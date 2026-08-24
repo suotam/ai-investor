@@ -1,0 +1,512 @@
+schema_version: 1
+
+investment:
+  symbol: NU
+  name: "Nu Holdings Ltd."
+  lifecycle_status: OWNED
+  time_horizon: "5+ years"
+  review_frequency: MONTHLY
+
+instrument:
+  symbol: NU
+  exchange: NYSE
+  currency: USD
+
+thesis:
+  title: "NU Holdings — Long-term LATAM financial platform compounder"
+
+  summary: >
+    NU is viewed not merely as a rapidly growing Brazilian bank but as a
+    technology-driven financial platform with structurally low operating costs,
+    strong customer acquisition economics, increasing customer monetization,
+    and the potential to replicate parts of its Brazilian model across Latin America.
+
+  core_thesis: |
+    NU's long-term investment case rests on its ability to combine rapid customer
+    growth with increasing monetization, strong credit economics, high returns on
+    equity, and structural operating leverage.
+
+    The Brazilian business demonstrates that the digital model can operate at very
+    large scale. Its low cost-to-serve, digital distribution, brand, customer data,
+    and underwriting capabilities create advantages over traditional banks.
+
+    Existing customers should become increasingly valuable over time as they adopt
+    additional products and NU captures a larger share of their financial lives.
+    Rising ARPAC combined with slower growth in structural operating costs should
+    drive operating leverage.
+
+    Mexico represents the most important second growth engine. Successful replication
+    of the Brazilian playbook would materially expand NU's long-term addressable market.
+
+    Expansion beyond the core Latin American opportunity is optionality and is not
+    required for the base thesis.
+
+  market_expectation: |
+    The market may primarily value NU as a fast-growing but relatively risky
+    Latin American bank whose profitability and valuation are vulnerable to credit
+    cycles and emerging-market risks.
+
+  our_expectation: |
+    NU has the potential to behave more like a technology-enabled financial platform
+    and long-duration compounder than a traditional bank, combining structural cost
+    advantages, increasing customer monetization and high returns on capital.
+
+  variant_perception: |
+    If NU can maintain strong risk-adjusted economics while scaling across Latin America,
+    it may deserve a structurally higher long-term valuation than a conventional bank.
+
+  why_market_may_be_wrong: |
+    Traditional bank comparisons may understate NU's structural cost advantage,
+    digital distribution economics, customer data advantages, cross-sell potential,
+    and operating leverage.
+
+  confidence: 75
+  time_horizon: "5+ years"
+  reason_for_revision: "Original investment thesis"
+
+assumptions:
+  - name: "Customer growth remains economically attractive"
+    category: growth
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 80
+    description: |
+      NU can continue acquiring customers across Latin America without a material
+      deterioration in acquisition economics. Customer count alone is not sufficient;
+      activity and monetization must remain healthy.
+    time_horizon: "5+ years"
+    breaker_condition: |
+      Sustained customer growth requiring structurally worsening acquisition economics
+      or producing low-quality inactive customers.
+
+  - name: "ARPAC continues to grow"
+    category: unit_economics
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 80
+    description: |
+      Existing customers increasingly adopt additional products and NU captures a
+      larger share of wallet. Q2 2026 ARPAC was approximately $17.1.
+    time_horizon: "5+ years"
+    breaker_condition: |
+      Sustained stagnation or decline in monetization despite continued customer growth.
+
+  - name: "Credit quality remains economically controlled"
+    category: balance_sheet
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 70
+    description: |
+      Lending growth must not be achieved at the cost of future credit losses that
+      destroy the economics of growth. Q2 2026 showed 15–90 day NPL improving to 4.8%
+      while NPL 90+ increased to 6.9%. Risk-adjusted NIM improved to 12.4%.
+    time_horizon: "continuous"
+    breaker_condition: |
+      Multi-quarter deterioration in early delinquencies together with materially
+      worsening cost of risk and risk-adjusted NIM.
+
+  - name: "NU maintains structurally high ROE"
+    category: margin
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 80
+    description: |
+      NU can combine growth with returns on equity substantially above traditional
+      banking levels. Q2 2026 ROE was approximately 33%.
+    time_horizon: "5+ years"
+    breaker_condition: |
+      Structural ROE deterioration to levels inconsistent with the compounder thesis,
+      excluding clearly justified temporary investment phases.
+
+  - name: "Operating leverage persists"
+    category: margin
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 80
+    description: |
+      Revenue and customer monetization can grow faster than structural operating costs
+      because of NU's digital cost base.
+    time_horizon: "5+ years"
+    breaker_condition: |
+      Operating expenses structurally growing as fast as or faster than revenue
+      without a credible reinvestment explanation.
+
+  - name: "Mexico becomes a meaningful second engine"
+    category: growth
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 65
+    description: |
+      Mexico can evolve from customer acquisition into a sustainably monetized,
+      economically attractive second market. Q2 2026 customer count was roughly 16 million.
+    time_horizon: "5+ years"
+    breaker_condition: |
+      Strong customer growth without credible progress in engagement, monetization,
+      deposits, lending economics or path to attractive returns.
+
+  - name: "Loan growth remains economically high quality"
+    category: unit_economics
+    importance: HIGH
+    status: SUPPORTED
+    confidence: 70
+    description: |
+      Q2 2026 loan portfolio was approximately $39.4B, up roughly 37% year over year.
+      Growth is valuable only if credit quality and risk-adjusted profitability remain healthy.
+    time_horizon: "continuous"
+    breaker_condition: |
+      Loan growth remains high while risk-adjusted profitability and credit quality
+      deteriorate materially.
+
+risks:
+  - name: "Credit deterioration"
+    category: financial
+    severity: CRITICAL
+    status: OPEN
+    description: |
+      Rapid lending growth could produce delayed credit losses that materially reduce
+      profitability and invalidate the quality-growth thesis.
+
+  - name: "Mexico execution"
+    category: execution
+    severity: HIGH
+    status: OPEN
+    description: |
+      The Brazilian playbook may not translate into similarly attractive economics in Mexico.
+
+  - name: "LATAM macro exposure"
+    category: macro
+    severity: HIGH
+    status: OPEN
+    description: |
+      Rates, unemployment, currency moves and credit cycles in Brazil and other Latin
+      American markets may materially affect credit performance and valuation.
+
+  - name: "Regulatory risk"
+    category: regulatory
+    severity: HIGH
+    status: OPEN
+    description: |
+      Financial regulation may alter product economics, capital requirements or competitive dynamics.
+
+  - name: "Competitive erosion"
+    category: competitive
+    severity: MEDIUM
+    status: OPEN
+    description: |
+      Traditional banks or new fintech competitors could reduce NU's structural advantage.
+
+  - name: "Valuation risk"
+    category: valuation
+    severity: HIGH
+    status: OPEN
+    description: |
+      A high-quality business can still produce poor shareholder returns if purchased
+      at an excessively optimistic valuation.
+
+thesis_breakers:
+  - name: "Structural deterioration in credit quality"
+    severity: CRITICAL
+    condition_text: |
+      Several quarters of rising delinquencies combined with worsening risk-adjusted
+      NIM and increasing cost of risk.
+
+  - name: "Loss of operating leverage"
+    severity: HIGH
+    condition_text: |
+      Structural operating costs grow at or above revenue for an extended period
+      without a credible reinvestment explanation.
+
+  - name: "Structural ROE collapse"
+    severity: HIGH
+    condition_text: |
+      ROE falls structurally to levels inconsistent with the platform/compounder thesis.
+
+  - name: "Mexico economics fail"
+    severity: HIGH
+    condition_text: |
+      Mexico grows customers but fails to demonstrate credible monetization and
+      sustainable unit economics.
+
+  - name: "Loss of structural cost advantage"
+    severity: CRITICAL
+    condition_text: |
+      Evidence shows NU no longer maintains a meaningful cost-to-serve or distribution
+      advantage versus incumbents.
+
+kpis:
+  - name: "Customers"
+    unit: "million"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Platform scale and continued adoption."
+
+  - name: "Active customers"
+    unit: "million"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Quality of customer growth."
+
+  - name: "ARPAC"
+    unit: "USD/month"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Customer monetization and cross-sell."
+    observations:
+      - period: "2026-Q2"
+        value: 17.1
+        source: "NU Q2 2026 results"
+
+  - name: "Loan portfolio"
+    unit: "USD billion"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Scale of lending growth."
+    observations:
+      - period: "2026-Q2"
+        value: 39.4
+        source: "NU Q2 2026 results"
+
+  - name: "Loan growth YoY"
+    unit: "%"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Lending growth rate."
+    observations:
+      - period: "2026-Q2"
+        value: 37
+        source: "NU Q2 2026 results"
+
+  - name: "15–90 day NPL"
+    unit: "%"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: down
+    thesis_relevance: "Early credit deterioration signal."
+    observations:
+      - period: "2026-Q2"
+        value: 4.8
+        source: "NU Q2 2026 results"
+
+  - name: "NPL 90+"
+    unit: "%"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: down
+    thesis_relevance: "Lagging credit deterioration."
+    observations:
+      - period: "2026-Q2"
+        value: 6.9
+        source: "NU Q2 2026 results"
+
+  - name: "Risk-adjusted NIM"
+    unit: "%"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Risk-adjusted lending economics."
+    observations:
+      - period: "2026-Q2"
+        value: 12.4
+        source: "NU Q2 2026 results"
+
+  - name: "ROE"
+    unit: "%"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Overall quality of business economics."
+    observations:
+      - period: "2026-Q2"
+        value: 33
+        source: "NU Q2 2026 results"
+
+  - name: "Net income"
+    unit: "USD billion"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Absolute earnings power."
+    observations:
+      - period: "2026-Q2"
+        value: 1.061
+        source: "NU Q2 2026 results"
+
+  - name: "Mexico customers"
+    unit: "million"
+    frequency: QUARTERLY
+    importance: HIGH
+    direction_good: up
+    thesis_relevance: "Progress of second major geography."
+    observations:
+      - period: "2026-Q2"
+        value: 16
+        source: "NU Q2 2026 results"
+
+evidence:
+  - target_type: THESIS
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "Q2 2026 net income exceeded $1B"
+    summary: |
+      Net income reached approximately $1.061B, around 49% year-over-year growth
+      on an FX-neutral basis.
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "NU maintains structurally high ROE"
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "Q2 2026 ROE reached 33%"
+    summary: "ROE remained exceptionally high at approximately 33%."
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "Credit quality remains economically controlled"
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "Early delinquency improved"
+    summary: "15–90 day NPL declined from approximately 5.0% to 4.8%."
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "Credit quality remains economically controlled"
+    direction: CONTRADICTING
+    evidence_type: EARNINGS
+    title: "NPL 90+ increased"
+    summary: "NPL 90+ increased from approximately 6.5% to 6.9%."
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "Credit quality remains economically controlled"
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "Risk-adjusted NIM improved"
+    summary: "Risk-adjusted NIM improved to approximately 12.4%."
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "ARPAC continues to grow"
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "ARPAC reached approximately $17.1"
+    summary: "Customer monetization remained strong."
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: HIGH
+
+  - target_type: ASSUMPTION
+    target_name: "Mexico becomes a meaningful second engine"
+    direction: SUPPORTING
+    evidence_type: EARNINGS
+    title: "Mexico reached roughly 16 million customers"
+    summary: |
+      Mexico continued scaling rapidly and remains the most important geographic
+      expansion opportunity after Brazil.
+    source_name: "NU Q2 2026 results"
+    reliability: HIGH
+    importance: MEDIUM
+
+valuation:
+  models:
+    - name: "2030 earnings multiple framework"
+      model_type: PE
+      reference_price: 13.65
+      currency: USD
+      notes: |
+        Historical valuation framework from the original investment analysis.
+        The company thesis was stronger than the valuation thesis at the time.
+      scenarios:
+        - scenario_name: BEAR
+          probability: 20
+          target_price: 11.0
+          time_horizon_months: 48
+          dividends: 0
+          notes: |
+            2030 net income approximately $4.8B, EPS around $1.00 and 11x exit P/E.
+
+        - scenario_name: BASE
+          probability: 50
+          target_price: 27.1
+          time_horizon_months: 48
+          dividends: 0
+          notes: |
+            2030 net income approximately $8.1B, EPS around $1.69 and 16x exit P/E.
+
+        - scenario_name: BULL
+          probability: 30
+          target_price: 54.3
+          time_horizon_months: 48
+          dividends: 0
+          notes: |
+            2030 net income approximately $11.8B, EPS around $2.47 and 22x exit P/E.
+
+predictions:
+  - statement: "NU maintains ROE substantially above traditional banking levels over the long term."
+    probability: 75
+    resolution_condition: "Evaluate across multiple future annual and quarterly reporting periods."
+    notes: "Long-horizon qualitative prediction."
+
+  - statement: "ARPAC continues to grow over the long term."
+    probability: 80
+    resolution_condition: "Evaluate from subsequent quarterly ARPAC observations."
+    notes: "Should eventually be replaced by more precisely time-bounded predictions for calibration."
+
+  - statement: "Mexico becomes an economically meaningful second market."
+    probability: 65
+    resolution_condition: |
+      Evaluate from customer growth, monetization, engagement, lending economics
+      and profitability development.
+    notes: "Long-horizon prediction with relatively high uncertainty."
+
+  - statement: "Credit losses do not erase the economic benefit of lending growth."
+    probability: 70
+    resolution_condition: |
+      Evaluate using NPL formation, cost of risk and risk-adjusted profitability
+      over multiple reporting periods.
+
+  - statement: "Risk-adjusted profitability remains strong while the loan book scales."
+    probability: 70
+    resolution_condition: |
+      Evaluate across future risk-adjusted NIM and loan portfolio observations.
+
+decisions:
+  - decision_type: BUY
+    decided_at: "2026-08-19"
+    reasoning: |
+      Q2 results continued to support the long-term investment thesis through
+      exceptionally high ROE, continued lending and monetization growth, strong
+      risk-adjusted NIM, and continued Mexico expansion.
+
+      Credit quality requires close monitoring because NPL 90+ increased, but the
+      combination of improving 15–90 day NPL, lower cost of credit and stronger
+      risk-adjusted NIM did not indicate a structural breakdown in lending economics.
+
+      Valuation was not sufficiently cheap to justify immediate high concentration,
+      so the initial position was deliberately kept relatively small with the option
+      to add capital as fundamentals and price evolve.
+
+    confidence: 75
+    time_horizon: "5+ years"
+    expected_outcome: |
+      Long-term compounding driven by customer growth, increasing monetization,
+      operating leverage and geographic expansion.
+
+    what_would_make_this_wrong: |
+      Structural deterioration in credit economics, loss of operating leverage,
+      failure of Mexico monetization, structural ROE deterioration, or evidence
+      that NU lacks a durable cost advantage.

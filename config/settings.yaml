@@ -1,0 +1,33 @@
+# Investor OS configuration. No secrets here (see .env).
+base_currency: CZK
+
+portfolio:
+  default_benchmark: SPY
+  # Benchmarks tracked by `update-prices`. Symbols are provider symbols (Yahoo for v1).
+  benchmarks:
+    - symbol: SPY
+      name: "S&P 500 (SPY ETF)"
+      currency: USD
+    - symbol: QQQ
+      name: "Nasdaq-100 (QQQ ETF)"
+      currency: USD
+
+market_data:
+  provider: yahoo
+  # How far back to fetch history when an instrument has no cached prices
+  default_history_start: "2015-01-01"
+
+ibkr:
+  flex_version: 3
+  base_url: "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
+  # Seconds to wait between GetStatement retries while the report is being generated
+  poll_interval_seconds: 5
+  max_poll_attempts: 12
+
+dashboard:
+  host: 127.0.0.1
+  port: 8501
+
+logging:
+  path: logs/investor.log
+  level: INFO

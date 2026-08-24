@@ -1,0 +1,162 @@
+# Example research import file for Investor OS (schema_version 1).
+# GENERIC DEMO CONTENT ONLY - do not import into your production database as-is.
+# Usage:
+#   python -m src.main import-research examples\research\nu_example.yaml --dry-run
+#
+# Conventions: enums are case-insensitive; confidence and probability are 0-100;
+# a thesis section always creates version 1 (revisions are done in the dashboard, never here).
+
+schema_version: 1
+
+investment:
+  symbol: DEMO
+  name: Demo Holdings
+  lifecycle_status: RESEARCHING     # DISCOVERED/WATCHLIST/RESEARCHING/READY_FOR_DECISION/OWNED/...
+  review_frequency: quarterly       # after_earnings/monthly/quarterly/semiannual/annual/manual
+  time_horizon: "5+ years"          # informational, stored in notes
+  next_review_date: null
+
+# Optional: link to an existing v1 portfolio instrument (never creates one).
+# Omit the block to auto-link by symbol; specify exchange+currency to disambiguate.
+instrument:
+  symbol: DEMO
+  exchange: NYSE
+  currency: USD
+
+thesis:
+  title: "Demo Holdings - long-term compounder thesis"
+  summary: "High-return business with a long reinvestment runway."
+  core_thesis: |
+    The company compounds book value above 25% annually while the market
+    prices it as a mature, single-digit grower.
+  market_expectation: |
+    Consensus models growth fading to GDP-like rates within three years.
+  our_expectation: |
+    Unit economics and customer growth support >20% revenue growth for 5+ years.
+  variant_perception: |
+    The market anchors on legacy peers; this is a structurally lower-cost operator.
+  why_market_may_be_wrong: |
+    Cohort data and take-rate expansion are underappreciated in sell-side models.
+  confidence: 70                    # 0-100 (strength of belief, not a probability)
+  time_horizon: "5+ years"
+  reason_for_revision: "Original thesis"   # informational; imported thesis is always v1
+
+assumptions:
+  - name: "Revenue growth stays above 20%"
+    category: growth                # growth/margin/unit_economics/balance_sheet/management/...
+    importance: HIGH                # LOW/MEDIUM/HIGH
+    status: SUPPORTED               # SUPPORTED/WEAKENING/UNKNOWN/CHALLENGED/BROKEN
+    confidence: 75
+    expected_min: 20
+    unit: "%"
+    breaker_condition: "Growth below 15% for two consecutive years"
+  - name: "Credit quality remains controlled"
+    category: balance_sheet
+    importance: HIGH
+    status: UNKNOWN
+    kpi_name: "NPL 90+"             # links the assumption to a KPI defined below
+
+risks:
+  - name: "FX depreciation vs USD"
+    category: currency              # business/financial/valuation/.../currency/execution/...
+    probability: 40
+    impact: MEDIUM
+    severity: MEDIUM                # LOW/MEDIUM/HIGH/CRITICAL
+    mitigation: "Revenue increasingly diversified across countries"
+
+thesis_breakers:
+  - name: "NPL 90+ above 7% for two quarters"
+    severity: CRITICAL
+    condition_text: "NPL 90+ > 7% in two consecutive quarterly reports"
+
+catalysts:
+  - name: "New market banking license"
+    expected_date: null
+    probability: 60
+    potential_impact: "Opens a market twice the size of the home market"
+    status: PENDING                 # imported catalysts are always PENDING (OPEN is accepted as alias)
+
+kpis:
+  - name: "ROE"
+    unit: "%"
+    frequency: quarterly            # monthly/quarterly/semiannual/annual/irregular
+    importance: HIGH
+    direction_good: up              # up/down/range (HIGHER/LOWER accepted as aliases)
+    thesis_relevance: "Core measure of compounding power"
+    observations:
+      - period: "2026Q2"
+        value: 28.0
+        source: "Demo Q2 2026 results"
+  - name: "NPL 90+"
+    unit: "%"
+    frequency: quarterly
+    importance: HIGH
+    direction_good: down
+    observations:
+      - period: "2026Q1"
+        value: 5.1
+        source: "Demo Q1 2026 results"
+      - period: "2026Q2"
+        value: 5.4
+        source: "Demo Q2 2026 results"
+
+evidence:
+  - target_type: thesis             # investment/thesis/assumption/risk/catalyst/valuation
+    direction: SUPPORTING           # SUPPORTING/CONTRADICTING/NEUTRAL
+    evidence_type: earnings         # manual/filing/earnings/transcript/news/macro/...
+    title: "Q2: revenue +32% YoY, ROE 28%"
+    summary: "Growth and returns both above our thresholds."
+    source_name: "Q2 2026 earnings release"
+    source_date: 2026-08-14
+    reliability: HIGH               # LOW/MEDIUM/HIGH
+    importance: HIGH
+  - target_type: assumption
+    target_name: "Credit quality remains controlled"   # resolved by name within this file
+    direction: CONTRADICTING
+    evidence_type: earnings
+    title: "NPL 90+ ticked up to 5.4%"
+    reliability: HIGH
+    importance: MEDIUM
+
+valuation:
+  models:
+    - name: "2030 earnings multiple"
+      model_type: pe                # dcf/pe/ev_ebitda/ev_sales/pb/fcf_yield/sotp/custom
+      reference_price: 13.65
+      currency: USD
+      scenarios:                    # probabilities must sum to ~100
+        - scenario_name: bear
+          probability: 20
+          target_price: 11
+          time_horizon_months: 48
+          dividends: 0
+        - scenario_name: base
+          probability: 50
+          target_price: 27.1
+          time_horizon_months: 48
+          dividends: 0
+        - scenario_name: bull
+          probability: 30
+          target_price: 54.3
+          time_horizon_months: 48
+          dividends: 0
+
+predictions:
+  - statement: "Revenue growth above 25% in FY2027"
+    probability: 70                 # REQUIRED, 0-100
+    resolution_date: 2028-03-31
+    resolution_condition: "FY2027 reported revenue growth vs FY2026"
+
+decisions:
+  - decision_type: BUY              # BUY/ADD/HOLD/TRIM/SELL/WATCH/REJECT/NO_ACTION
+    decided_at: 2026-08-19          # snapshot uses cached prices/valuation as of this date;
+                                    # anything unavailable is stored as null, never fabricated
+    reasoning: |
+      Entry at a double-digit earnings yield on 2028 estimates with optionality
+      from new markets.
+    confidence: 70
+    time_horizon: "5+ years"
+    expected_outcome: |
+      Mid-teens+ annualized return in the base case.
+    what_would_make_this_wrong: |
+      Sustained credit deterioration or growth fading below 15%.

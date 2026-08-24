@@ -1,0 +1,7 @@
+date,type,asset,quantity,price,currency,fee,external_id,note
+2024-01-05,deposit,CZK,700000,,CZK,0,dep-1,bank transfer
+2024-01-06 10:15:00,buy,BTC,0.5,1000000,CZK,250,tx-1,first buy
+2024-02-01,buy,ETH,2,55000,CZK,100,tx-2,
+2024-03-01,sell,BTC,0.2,1200000,CZK,120,tx-3,partial sell
+2024-03-15,staking,ETH,0.01,,CZK,0,tx-4,staking reward
+2024-04-01,withdrawal,CZK,20000,,CZK,0,wd-1,to bank

@@ -10,6 +10,11 @@ A **local-first, read-only, deterministic** personal investment platform.
   pipeline), immutable thesis versions, explicit assumptions, risks, catalysts, thesis
   breakers, evidence, KPIs, valuation scenarios, an immutable decision journal, predictions
   and a deterministic review/health system. Fully usable **without any AI**.
+* **v3 — intelligence layer**: external primary-source data with full provenance (SEC/EDGAR
+  filings + XBRL, FRED macro, Form 4 insiders, 13F, congressional CSV imports, news provider
+  interface), a deterministic intelligence-event inbox, technical context, discovery
+  candidates, daily/weekly briefs, and an OPTIONAL local AI that produces PROPOSALS which
+  only a human can accept. AI never writes to research tables.
 
 ## Philosophy (v2)
 
@@ -379,13 +384,185 @@ All manual entry (investments, theses, revisions, assumptions, KPIs, evidence, r
 catalysts, breakers, valuations, decisions, predictions, red team, pre-mortem) happens in
 the dashboard Research page forms.
 
+## Intelligence layer (v3)
+
+### Pipeline & safety
+`DATA -> NORMALIZED FACT -> EVIDENCE/KPI OBSERVATION -> INTERPRETATION -> AI PROPOSAL ->
+HUMAN REVIEW -> ACCEPT/REJECT -> THESIS REVISION (v2 service)`. These layers never collapse:
+external data and AI cannot modify theses, assumptions, breakers, risks, catalysts,
+valuations, decisions or prediction resolutions. The single AI write target is
+`ai_proposals`; acceptance (dashboard Intelligence Inbox or `proposals accept`) validates a
+typed payload and calls the existing v2 service - a THESIS_REVISION additionally requires an
+explicit human `reason_for_revision` and creates a new immutable version. IBKR remains read
+only; there is no trading code.
+
+### Provenance & source hierarchy
+Every external item is registered in `source_documents` (provider, source type, external id,
+URL, published/retrieved timestamps, parser version, metadata) with the raw payload archived
+under `data/raw/<category>/` named by content hash - re-downloads of identical content are
+no-ops, changed content is archived as a new file and the original is never overwritten.
+Source tiers are explicit: 1 = primary (SEC, FRED, official filings), 2 = reputable
+providers/press, 3 = aggregators, 4 = social/unverified. AI context always includes the tier;
+a primary filing outweighs a secondary article.
+
+### SEC / EDGAR (Tier 1)
+`sec sync <ticker>`: ticker -> CIK via the official mapping, submissions index, material
+filings archived + `NEW_FILING` events (10-K/20-F are HIGH materiality). **Foreign private
+issuers are first-class**: NU files 20-F and 6-K, never 10-K/10-Q - the connector stores what
+the issuer actually files and filters by the configurable `sec.material_forms`. Set
+`SEC_USER_AGENT` in `.env` (SEC requires a descriptive UA with contact); requests are
+rate-limited (~1/0.15 s), retried and time-limited. `sec filings <ticker>` lists the archive.
+
+### XBRL & KPI bridge
+`sec sync` also ingests `companyfacts` (structured XBRL, us-gaap AND ifrs-full) into
+`financial_facts` - append-only, hash-idempotent, restatements become new rows. Concept ->
+metric mapping is a deliberate alias table (never one-tag-one-KPI guessing) plus issuer
+overrides. The KPI bridge then distinguishes: (A) deterministic mappings -> automatic
+`kpi_observations` with provenance (`source=sec_xbrl`, accession in source_reference),
+(B) loose name matches -> a KPI_MAPPING proposal for human review, (C) issuer-specific KPIs
+(customers, ARPAC, NPL 90+...) -> reported as unsupported, values never invented.
+
+### Insiders (Form 4)
+`insiders sync <ticker>` parses raw ownership XML: transaction codes are normalized
+(open-market purchase/sale, option exercise, award, tax withholding, gift...) and a sale is
+never automatically bearish. Deterministic 30/90/365-day aggregates (buyers, sellers, net
+shares, net value) are context, not signals. Only open-market transactions create events.
+
+### Congress (interface + CSV)
+There is no stable free official PTR API, so v3 ships the `CongressProvider` interface with a
+CSV importer (`congress import file.csv`) for exports you trust. Preserved caveats: amounts
+are RANGES, disclosure lags the transaction, owner may be spouse/dependent, unresolvable
+tickers stay NULL. Events fire only for tracked people (watchlist) or companies we research.
+
+### Institutional (13F)
+`institutional add-manager "Name" CIK` + `institutional sync`: 13F-HR information tables per
+period, deterministic change detection (NEW/INCREASED/DECREASED/EXITED/UNCHANGED) between the
+two latest periods. Displayed everywhere with the disclaimer: delayed up to 45 days, no
+shorts, incomplete portfolio - context, never endorsement.
+
+### Macro
+`macro sync` pulls configured FRED series (no API key; official aggregation of BLS/BEA/OECD)
+into vintage-aware `macro_observations` - a revised value becomes a NEW row, reads take the
+latest vintage per date. Series link to investments (`investment_macro_links`: relationship,
+why it matters, importance) and linked releases create MEDIUM events. Limitation: Mexico
+policy rate and Brazil unemployment have no reliable key-free FRED series (previous OECD
+codes discontinued).
+
+### Technical context
+Deterministic indicators from the existing v1 price cache: SMA 20/50/200, 52-week high/low +
+distance, 20d realized volatility, ATR(14), RSI(14), drawdown. Output is factual statements
+("price is 18% below the 52-week high"), available via `technical <ticker>` and on the
+Company Intelligence page. Highs/lows are approximated from closes (OHLC not used). Never a
+signal.
+
+### News
+`NewsProvider` interface with normalization, URL dedup and same-story clustering; only
+metadata and short excerpts are stored (copyright). No commercial provider is bundled in v3 -
+`NullNewsProvider` is the default (documented limitation).
+
+### Intelligence events & materiality
+Everything meaningful lands in `intelligence_events` (deduplicated by key): NEW_FILING,
+EARNINGS_RELEASE, KPI_UPDATE, INSIDER_TRANSACTION, CONGRESS_TRANSACTION,
+INSTITUTIONAL_CHANGE, MACRO_RELEASE, PRICE_EVENT, NEWS_EVENT. Materiality is deterministic
+(rules in `src/intelligence/events.py`: earnings/annual filings HIGH; open-market insider
+trades MEDIUM; congress/news LOW...). AI may comment but never overrides these categories.
+
+### AI (optional, local)
+Provider abstraction with a local OpenAI-compatible implementation (llama.cpp). Configure in
+`config/settings.yaml` / `.env` (`ai.enabled`, `AI_BASE_URL`, `AI_MODEL`); default endpoint
+`http://127.0.0.1:8080/v1`. **The app is fully functional with AI disabled or the server
+down** - AI failure never touches portfolio, research or ingestion. `ai status` shows the
+active provider. Privacy: no cloud LLM; research data never leaves the machine.
+
+AI agents (all produce PENDING proposals only, with provider/model/prompt version/context
+hash recorded for auditability):
+* `ai analyze <ticker> --event <id>` - contradiction-first analysis: the model receives the
+  full investment context packet (thesis, assumptions, breakers, risks, KPIs, valuation,
+  decisions, predictions, evidence) plus ONE event, and must answer the 10-question set
+  (what supports / what contradicts / which assumptions weakened / breakers closer /
+  skeptical view / missing info / valuation vs quality / genuinely new / monitor next).
+  Purely bullish summaries are structurally impossible.
+* `ai redteam <ticker>` - adversarial attack on the thesis (bear case, fragile assumptions,
+  base rates, incentives, accounting, competition, regulation, macro, valuation risk).
+* `ai earnings <ticker> [--event id]` - structured earnings review (exec summary, top-5
+  changes, KPI table prev/current/change, thesis verdict, assumption/breaker analysis,
+  questions for next quarter, citations to stored sources).
+Epistemic rules are in every prompt: SOURCE FACT / CALCULATION / INTERPRETATION / HYPOTHESIS
+/ UNKNOWN - missing data must be answered UNKNOWN, never filled from pretrained memory.
+Context packets are time-aware (`as_of`) so historical decision reviews cannot use later
+information (no-hindsight, tested).
+
+### Briefs, discovery, calendar
+`brief daily` / `brief weekly` are fully deterministic aggregations (portfolio, material
+events, pending proposals, needs-attention, prediction record, upcoming dates, "what changed
+this week that actually matters"). `discovery run` builds research candidates from modular
+factors (13F new/increased positions of tracked managers; clusters of >=2 insiders buying
+in 90d; manual) - "PROMOTE TO RESEARCH" creates a DISCOVERED investment via the v2 service;
+fundamental screens await a fundamentals data source (limitation). The calendar aggregates
+only KNOWN dates (catalysts, prediction deadlines, thesis reviews) - nothing fabricated.
+
+### Dashboard pages (v3)
+**Intelligence Inbox** (proposals with WHAT HAPPENED / WHY IT MATTERS / SOURCE + tier /
+side-by-side CURRENT vs PROPOSED thesis / ACCEPT with required reason / REJECT / DEFER;
+events with deterministic severity), **Company Intelligence** (filings, structured
+financials, insiders, 13F, macro links, technical context per investment), **Markets &
+Discovery** (macro charts, insiders, congress, institutional changes, candidates, 7/30-day
+calendar, watchlists).
+
+### v3 commands
+
+```powershell
+python -m src.main sec sync NU              # DOWNLOAD+PROCESS: filings + XBRL + KPI bridge
+python -m src.main sec filings NU
+python -m src.main macro sync
+python -m src.main insiders sync NU
+python -m src.main institutional add-manager "Name" CIK
+python -m src.main institutional sync
+python -m src.main congress import file.csv
+python -m src.main intelligence events --severity MEDIUM
+python -m src.main technical NU
+python -m src.main ai status                # which provider is active
+python -m src.main ai analyze NU --event 3  # AI ANALYZE: proposals only
+python -m src.main ai redteam NU
+python -m src.main ai earnings NU --event 3
+python -m src.main proposals list           # APPLY step is always human
+python -m src.main proposals accept 1 --reason "..."
+python -m src.main brief daily
+python -m src.main brief weekly
+python -m src.main discovery run
+```
+
+### Suggested daily workflow (Windows Task Scheduler friendly - each command is idempotent,
+no daemon required)
+
+```text
+06:00  sec sync NU  +  macro sync  +  insiders sync NU  (+ institutional sync weekly)
+06:10  intelligence events --severity MEDIUM
+06:20  ai analyze ... (optional, if the llama.cpp server is running)
+06:30  brief daily
+```
+
+### v3 limitations (documented, intentional)
+* Congress: CSV imports only (no stable free official API); live scraping is a future
+  provider behind the same interface.
+* News: interface only, no bundled provider.
+* Earnings transcripts and management commentary are not ingested (UNKNOWN in AI output).
+* Issuer-specific KPIs absent from XBRL (customers, ARPAC, NPL 90+...) remain manual.
+* Technical context approximates highs/lows from closes.
+* Mexico policy rate / Brazil unemployment macro series unavailable key-free on FRED.
+* Fundamental discovery screens await a fundamentals data source.
+* AI requires a locally running llama.cpp server; quality depends on the local model.
+* Deterministic vs AI-generated: everything in briefs, events, aggregates, facts and
+  technical context is deterministic Python; only proposal content and analysis text inside
+  the Inbox is AI-generated and is labeled with provider/model/prompt version.
+
 ## Tests
 
 ```powershell
 python -m pytest
 ```
 
-64 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
+112 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
 archiving/audit, instrument resolution, cash ledger, average-cost/short/cross-zero/FIFO engine,
 valuation & weights, FX (direct/inverse/cross/staleness/unavailable), price cache incrementality,
 value history, TWR/simple/XIRR/drawdown on hand-checkable scenarios, snapshot idempotency, crypto
@@ -451,12 +628,10 @@ resolutions are all **manual**. There is no automatic earnings/SEC/news/insider/
 are v3+. Free-form breaker conditions are not machine-evaluated. Calibration shows simple
 counts only. Deleting research rows is not exposed in the UI (immutability first).
 
-## What v3 should do next
+## What v4 should do next
 
-Feed the research layer automatically while keeping the manual workflow intact: SEC/EDGAR
-filings + XBRL company facts into `evidence` and `kpi_observations`, earnings calendar into
-`catalysts`, Form 4 insider and Congress PTR ingestion (with disclosure-delay context), 13F
-for selected investors, and the first AI layer - proposals only (thesis revision drafts,
-evidence interpretation, red-team arguments) through the PROPOSAL -> REVIEW -> ACCEPT flow.
-On the portfolio side: broker-side reconciliation (CashReport/OpenPositions) and corporate
-actions remain the top accounting items.
+Earnings-release parsing for issuer-specific KPIs (NU: customers, ARPAC, NPL - from 6-K
+exhibits/IR PDFs) feeding the existing KPI bridge; transcript ingestion; a live congressional
+provider; scheduled automation (Task Scheduler recipes); calibration statistics once enough
+predictions resolve; and on the portfolio side broker-side reconciliation
+(CashReport/OpenPositions) and corporate actions.

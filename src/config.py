@@ -30,6 +30,19 @@ class Settings:
     ibkr_base_url: str = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
     ibkr_poll_interval_seconds: float = 5.0
     ibkr_max_poll_attempts: int = 12
+    # v3 intelligence
+    sec_user_agent: str = "InvestorOS/3.0 (personal research; contact not-set@example.com)"
+    sec_rate_limit_seconds: float = 0.15
+    sec_material_forms: list[str] = field(default_factory=lambda: [
+        "10-K", "10-Q", "8-K", "20-F", "6-K", "S-1", "DEF 14A", "424B4", "F-1"
+    ])
+    ai_enabled: bool = False
+    ai_provider: str = "llama_cpp"
+    ai_base_url: str = "http://127.0.0.1:8080/v1"
+    ai_model: str = "local"
+    ai_timeout_seconds: float = 120.0
+    ai_temperature: float = 0.2
+    macro_default_series: list[dict] = field(default_factory=list)
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8501
     log_path: Path = PROJECT_ROOT / "logs" / "investor.log"
@@ -57,6 +70,9 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             raw = yaml.safe_load(fh) or {}
 
     pf = raw.get("portfolio", {}) or {}
+    sec = raw.get("sec", {}) or {}
+    ai = raw.get("ai", {}) or {}
+    intel = raw.get("intelligence", {}) or {}
     md = raw.get("market_data", {}) or {}
     ib = raw.get("ibkr", {}) or {}
     dash = raw.get("dashboard", {}) or {}
@@ -77,6 +93,16 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         ibkr_base_url=ib.get("base_url", Settings.ibkr_base_url),
         ibkr_poll_interval_seconds=float(ib.get("poll_interval_seconds", 5)),
         ibkr_max_poll_attempts=int(ib.get("max_poll_attempts", 12)),
+        sec_user_agent=os.environ.get("SEC_USER_AGENT") or sec.get("user_agent", Settings.sec_user_agent),
+        sec_rate_limit_seconds=float(sec.get("rate_limit_seconds", 0.15)),
+        sec_material_forms=list(sec.get("material_forms") or Settings().sec_material_forms),
+        ai_enabled=bool(ai.get("enabled", False)),
+        ai_provider=os.environ.get("AI_PROVIDER") or ai.get("provider", "llama_cpp"),
+        ai_base_url=os.environ.get("AI_BASE_URL") or ai.get("base_url", "http://127.0.0.1:8080/v1"),
+        ai_model=os.environ.get("AI_MODEL") or ai.get("model", "local"),
+        ai_timeout_seconds=float(ai.get("timeout_seconds", 120)),
+        ai_temperature=float(ai.get("temperature", 0.2)),
+        macro_default_series=list(intel.get("macro_series") or []),
         dashboard_host=dash.get("host", "127.0.0.1"),
         dashboard_port=int(dash.get("port", 8501)),
         log_path=_resolve(lg.get("path", "logs/investor.log")),

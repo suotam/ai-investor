@@ -31,3 +31,37 @@ dashboard:
 logging:
   path: logs/investor.log
   level: INFO
+
+# ---- v3 intelligence layer ----
+sec:
+  # SEC requires a descriptive User-Agent with contact info. Override via SEC_USER_AGENT in .env.
+  user_agent: "InvestorOS/3.0 (personal research; contact not-set@example.com)"
+  rate_limit_seconds: 0.15
+  material_forms: ["10-K", "10-Q", "8-K", "20-F", "6-K", "S-1", "DEF 14A", "F-1"]
+
+ai:
+  enabled: true            # the app is fully functional without AI
+  provider: llama_cpp       # local OpenAI-compatible server (llama.cpp)
+  base_url: "http://127.0.0.1:8080/v1"
+  model: "local"
+  timeout_seconds: 600
+  temperature: 0.2
+
+intelligence:
+  macro_series:             # default tracked macro series (FRED, no API key required)
+    - {code: FEDFUNDS,   name: "Federal Funds Rate",        unit: "%",     frequency: monthly}
+    - {code: CPIAUCSL,   name: "US CPI (all items)",        unit: "index", frequency: monthly}
+    - {code: CPILFESL,   name: "US Core CPI",               unit: "index", frequency: monthly}
+    - {code: UNRATE,     name: "US Unemployment rate",      unit: "%",     frequency: monthly}
+    - {code: GDPC1,      name: "US Real GDP",               unit: "bn",    frequency: quarterly}
+    - {code: DGS10,      name: "10Y Treasury yield",        unit: "%",     frequency: daily}
+    - {code: DGS2,       name: "2Y Treasury yield",         unit: "%",     frequency: daily}
+    - {code: T10Y2Y,     name: "10Y-2Y Treasury spread",    unit: "%",     frequency: daily}
+    - {code: DTWEXBGS,   name: "USD trade-weighted index",  unit: "index", frequency: daily}
+    - {code: DEXBZUS,    name: "USD/BRL",                   unit: "BRL",   frequency: daily}
+    - {code: DEXMXUS,    name: "USD/MXN",                   unit: "MXN",   frequency: daily}
+    - {code: IRSTCB01BRM156N, name: "Brazil policy rate (Selic proxy)", unit: "%", frequency: monthly}
+    - {code: BRACPIALLMINMEI, name: "Brazil CPI",           unit: "index", frequency: monthly}
+    - {code: MEXCPIALLMINMEI, name: "Mexico CPI",           unit: "index", frequency: monthly}
+    # Limitation: no reliable key-free FRED series found for Mexico policy rate and Brazil
+    # unemployment (previous OECD codes were discontinued); add via another provider later.

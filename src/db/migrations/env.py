@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from src.db.models import Base  # noqa: E402
 import src.db.research  # noqa: E402,F401  (registers research tables on Base.metadata)
+import src.db.intelligence  # noqa: E402,F401  (registers intelligence tables)
 
 config = context.config
 target_metadata = Base.metadata

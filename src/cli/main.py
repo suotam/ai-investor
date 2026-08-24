@@ -382,6 +382,428 @@ def import_research_cmd(
         raise typer.Exit(code=1)
 
 
+# ============================================================ v3 intelligence CLI
+sec_app = typer.Typer(help="SEC/EDGAR (read-only, rate-limited). DOWNLOAD + PROCESS steps.")
+app.add_typer(sec_app, name="sec")
+macro_app = typer.Typer(help="Macro series sync (FRED, official sources).")
+app.add_typer(macro_app, name="macro")
+insiders_app = typer.Typer(help="Insider (Form 4) ingestion. Context, not signals.")
+app.add_typer(insiders_app, name="insiders")
+inst_app = typer.Typer(help="Institutional 13F tracking (delayed/incomplete by nature).")
+app.add_typer(inst_app, name="institutional")
+congress_app = typer.Typer(help="Congressional disclosure import (CSV provider; see README limitations).")
+app.add_typer(congress_app, name="congress")
+intel_app = typer.Typer(help="Intelligence events inbox.")
+app.add_typer(intel_app, name="intelligence")
+ai_app = typer.Typer(help="AI ANALYZE step: creates PENDING proposals only; nothing is applied.")
+app.add_typer(ai_app, name="ai")
+proposals_app = typer.Typer(help="APPLY step: human review of AI proposals (accept/reject).")
+app.add_typer(proposals_app, name="proposals")
+brief_app = typer.Typer(help="Deterministic daily/weekly briefs.")
+app.add_typer(brief_app, name="brief")
+discovery_app = typer.Typer(help="Research candidate discovery (never purchase advice).")
+app.add_typer(discovery_app, name="discovery")
+
+
+@sec_app.command("sync")
+def sec_sync(
+    ticker: str = typer.Argument(..., help="Ticker, e.g. NU"),
+    facts: bool = typer.Option(True, help="Also sync XBRL companyfacts and run the KPI bridge."),
+    download_documents: bool = typer.Option(False, help="Also download primary filing documents."),
+) -> None:
+    """DOWNLOAD+PROCESS: filing index (foreign-issuer aware), XBRL facts, KPI bridge."""
+    settings = _boot()
+    from src.intelligence.connectors.sec import SecClient, sync_filings
+    from src.intelligence.connectors.xbrl import sync_companyfacts
+    from src.intelligence.kpi_mapping import apply_kpi_bridge
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        client = SecClient(settings)
+        summary = sync_filings(s, settings, ticker, client=client, download_documents=download_documents)
+        console.print(f"[green]SEC filings[/green]: {summary['issuer']} (CIK {summary['cik']}) "
+                      f"forms seen {summary['forms_seen']} | +{summary['filings_inserted']} new, "
+                      f"{summary['filings_duplicate']} known")
+        if facts:
+            fres = sync_companyfacts(s, settings, summary["cik"], client=client)
+            console.print(f"[green]XBRL facts[/green]: +{fres.get('facts_inserted', 0)} "
+                          f"(mapped to metrics: {fres.get('facts_mapped_to_metrics', 0)})")
+            inv = get_by_ticker(s, ticker)
+            if inv is not None:
+                bres = apply_kpi_bridge(s, inv, summary["cik"])
+                console.print(f"KPI bridge: deterministic {bres.deterministic} "
+                              f"(+{bres.observations_created} observations), "
+                              f"suggested {bres.suggested}, unsupported {len(bres.unsupported)}")
+
+
+@sec_app.command("filings")
+def sec_filings(ticker: str = typer.Argument(...)) -> None:
+    """List archived filings for an issuer."""
+    settings = _boot()
+    from src.intelligence.connectors.sec import list_filings
+    from src.intelligence.entities import instrument_by_cik
+    from src.db.intelligence import SourceDocument
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        docs = list(s.scalars(select(SourceDocument).where(
+            SourceDocument.provider == "sec_edgar", SourceDocument.source_type == "filing"
+        ).order_by(SourceDocument.published_at.desc())))
+        if not docs:
+            console.print("No filings archived yet. Run: python -m src.main sec sync " + ticker.upper())
+            return
+        t = Table(title=f"Archived SEC filings")
+        for col in ("Form", "Filed", "Period", "Issuer", "Accession"):
+            t.add_column(col)
+        import json as _json
+        for d in docs[:40]:
+            meta = _json.loads(d.metadata_json) if d.metadata_json else {}
+            t.add_row(meta.get("form", "?"), str(d.published_at.date() if d.published_at else "-"),
+                      str(d.period_end or "-"), (d.issuer or "")[:30], d.external_id)
+        console.print(t)
+
+
+@macro_app.command("sync")
+def macro_sync() -> None:
+    """DOWNLOAD: refresh configured macro series (vintage-aware, never overwrites history)."""
+    settings = _boot()
+    from src.intelligence.connectors.macro import sync_macro
+
+    with session_scope(settings.db_url) as s:
+        summary = sync_macro(s, settings)
+    n = sum(v["inserted"] for v in summary["series"].values())
+    console.print(f"[green]Macro sync[/green]: {len(summary['series'])} series, +{n} observations")
+    for e in summary["errors"]:
+        console.print(f"[yellow]warning:[/yellow] {e}")
+
+
+@insiders_app.command("sync")
+def insiders_sync_cmd(ticker: str = typer.Argument(...)) -> None:
+    """DOWNLOAD+PROCESS: recent Form 4 filings for the issuer."""
+    settings = _boot()
+    from src.intelligence.connectors.insiders import aggregate_insiders, sync_insiders
+    from src.intelligence.connectors.sec import SecClient
+
+    with session_scope(settings.db_url) as s:
+        summary = sync_insiders(s, settings, ticker, client=SecClient(settings))
+        console.print(f"[green]Insiders[/green]: {summary['form4_seen']} Form 4 seen, "
+                      f"+{summary['inserted']} transactions")
+        agg = aggregate_insiders(s, summary["cik"])
+        for w in ("30d", "90d", "365d"):
+            a = agg[w]
+            console.print(f"  {w}: {a['insiders_buying']} buying / {a['insiders_selling']} selling | "
+                          f"net {a['net_shares']:+,.0f} sh (${a['net_value_usd']:+,.0f})")
+        console.print(f"  [dim]{agg['note']}[/dim]")
+
+
+@inst_app.command("add-manager")
+def inst_add_manager(name: str = typer.Argument(...), cik: str = typer.Argument(...)) -> None:
+    settings = _boot()
+    from src.intelligence.connectors.institutional import add_manager
+
+    with session_scope(settings.db_url) as s:
+        m = add_manager(s, name, cik)
+    console.print(f"Tracking manager {m.name} (CIK {m.cik}). Run: institutional sync")
+
+
+@inst_app.command("sync")
+def inst_sync() -> None:
+    """DOWNLOAD+PROCESS: 13F-HR holdings for all tracked managers."""
+    settings = _boot()
+    from src.db.intelligence import InstitutionalManager
+    from src.intelligence.connectors.institutional import DISCLAIMER, sync_manager
+    from src.intelligence.connectors.sec import SecClient
+
+    with session_scope(settings.db_url) as s:
+        managers = list(s.scalars(select(InstitutionalManager).where(InstitutionalManager.active.is_(True))))
+        if not managers:
+            console.print("No tracked managers. Add one: institutional add-manager \"Name\" CIK")
+            return
+        client = SecClient(settings)
+        for m in managers:
+            summary = sync_manager(s, settings, m, client=client)
+            console.print(f"[green]{m.name}[/green]: {summary['reports_seen']} reports, "
+                          f"+{summary['holdings_inserted']} holdings")
+            for e in summary["errors"]:
+                console.print(f"  [yellow]{e}[/yellow]")
+    console.print(f"[dim]{DISCLAIMER}[/dim]")
+
+
+@congress_app.command("import")
+def congress_import_cmd(path: Path = typer.Argument(..., exists=True)) -> None:
+    """PROCESS: import a congressional disclosure CSV export (see README for format/limits)."""
+    settings = _boot()
+    from src.intelligence.connectors.congress import CsvCongressProvider, import_congress
+
+    with session_scope(settings.db_url) as s:
+        res = import_congress(s, settings, CsvCongressProvider(path), source_file=str(path))
+    console.print(f"[green]Congress import[/green]: +{res['inserted']} ({res['duplicates']} duplicates). "
+                  "Amounts are ranges; disclosure lags transactions.")
+
+
+@intel_app.command("events")
+def intel_events(
+    state: Optional[str] = typer.Option(None, help="NEW | PROCESSED | DISMISSED"),
+    severity: Optional[str] = typer.Option(None, help="minimum severity LOW|MEDIUM|HIGH"),
+) -> None:
+    settings = _boot()
+    from src.intelligence.events import list_events
+
+    with session_scope(settings.db_url) as s:
+        events = list_events(s, state=state, min_severity=severity)
+        t = Table(title=f"Intelligence events ({len(events)})")
+        for col in ("Id", "When", "Sev", "Type", "Title", "State", "AI"):
+            t.add_column(col)
+        for e in events[:50]:
+            t.add_row(str(e.id), f"{e.occurred_at:%Y-%m-%d}", e.severity, e.event_type,
+                      e.title[:60], e.processing_state, e.ai_state)
+        console.print(t)
+
+
+@ai_app.command("status")
+def ai_status() -> None:
+    """Show which AI provider is active and whether the local server responds."""
+    settings = _boot()
+    from src.intelligence.ai.provider import AIUnavailable, get_ai_provider
+
+    console.print(f"AI enabled: {settings.ai_enabled} | provider: {settings.ai_provider} | "
+                  f"model: {settings.ai_model} | endpoint: {settings.ai_base_url} (local)")
+    if not settings.ai_enabled:
+        console.print("Enable in config/settings.yaml (ai.enabled: true). The app works without AI.")
+        return
+    try:
+        provider = get_ai_provider(settings)
+        health = provider.health()
+        console.print("[green]available[/green]" if health["available"]
+                      else f"[yellow]unavailable:[/yellow] {health.get('error')}")
+    except AIUnavailable as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+
+
+@ai_app.command("analyze")
+def ai_analyze(
+    ticker: str = typer.Argument(...),
+    event_id: int = typer.Option(..., "--event", help="Intelligence event id to analyze."),
+) -> None:
+    """AI ANALYZE: contradiction-first analysis of one event. Creates PENDING proposals only."""
+    settings = _boot()
+    from src.db.intelligence import IntelligenceEvent
+    from src.intelligence.ai.analysis import analyze_event
+    from src.intelligence.ai.provider import AIInvalidOutput, AIUnavailable, get_ai_provider
+    from src.research.investments import get_by_ticker
+
+    try:
+        provider = get_ai_provider(settings)
+    except AIUnavailable as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=1)
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        event = s.get(IntelligenceEvent, event_id)
+        if inv is None or event is None:
+            console.print("[red]Investment or event not found.[/red]")
+            raise typer.Exit(code=1)
+        try:
+            analysis, proposals = analyze_event(s, provider, event, inv)
+        except (AIUnavailable, AIInvalidOutput) as exc:
+            console.print(f"[yellow]AI analysis failed cleanly (no data written):[/yellow] {exc}")
+            raise typer.Exit(code=1)
+        console.print("[bold]Supports thesis:[/bold] " + analysis.what_supports_thesis)
+        console.print("[bold]Contradicts thesis:[/bold] " + analysis.what_contradicts_thesis)
+        console.print("[bold]Skeptical view:[/bold] " + analysis.skeptical_view)
+        console.print("[bold]Missing info:[/bold] " + analysis.missing_information)
+        console.print(f"[green]{len(proposals)} proposal(s) created - PENDING, nothing applied.[/green] "
+                      "Review: python -m src.main proposals list")
+
+
+@ai_app.command("redteam")
+def ai_redteam(ticker: str = typer.Argument(...)) -> None:
+    """AI ANALYZE: adversarial red-team attack on the thesis. Proposals only."""
+    settings = _boot()
+    from src.intelligence.ai.analysis import run_red_team
+    from src.intelligence.ai.provider import AIInvalidOutput, AIUnavailable, get_ai_provider
+    from src.research.investments import get_by_ticker
+
+    try:
+        provider = get_ai_provider(settings)
+    except AIUnavailable as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=1)
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        try:
+            output, proposals = run_red_team(s, provider, inv)
+        except (AIUnavailable, AIInvalidOutput) as exc:
+            console.print(f"[yellow]Red team failed cleanly (no data written):[/yellow] {exc}")
+            raise typer.Exit(code=1)
+        console.print("[bold]Strongest bear case:[/bold] " + output.strongest_bear_case)
+        for f in output.fragile_assumptions:
+            console.print(f"  fragile: {f}")
+        console.print(f"[green]{len(proposals)} red-team proposal(s) PENDING review - nothing applied.[/green]")
+
+
+@ai_app.command("earnings")
+def ai_earnings(
+    ticker: str = typer.Argument(...),
+    event_id: Optional[int] = typer.Option(None, "--event", help="Earnings event id (optional)."),
+) -> None:
+    """AI ANALYZE: structured earnings review. Proposals only."""
+    settings = _boot()
+    from src.db.intelligence import IntelligenceEvent
+    from src.intelligence.ai.analysis import run_earnings_review
+    from src.intelligence.ai.provider import AIInvalidOutput, AIUnavailable, get_ai_provider
+    from src.research.investments import get_by_ticker
+
+    try:
+        provider = get_ai_provider(settings)
+    except AIUnavailable as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=1)
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        event = s.get(IntelligenceEvent, event_id) if event_id else None
+        try:
+            review, proposals = run_earnings_review(s, provider, inv, event)
+        except (AIUnavailable, AIInvalidOutput) as exc:
+            console.print(f"[yellow]Earnings review failed cleanly (no data written):[/yellow] {exc}")
+            raise typer.Exit(code=1)
+        console.print(f"[bold]Verdict:[/bold] {review.thesis_verdict}")
+        console.print(review.executive_summary)
+        for row in review.kpi_table:
+            console.print(f"  {row.kpi}: {row.previous} -> {row.current} ({row.change})")
+        console.print(f"[green]{len(proposals)} proposal(s) PENDING review - nothing applied.[/green]")
+
+
+@proposals_app.command("list")
+def proposals_list(status: str = typer.Option("PENDING", help="PENDING|ACCEPTED|REJECTED|...")) -> None:
+    settings = _boot()
+    from src.intelligence.ai.proposals import list_proposals
+
+    with session_scope(settings.db_url) as s:
+        rows = list_proposals(s, status=status)
+        t = Table(title=f"AI proposals ({status})")
+        for col in ("Id", "Type", "Title", "Conf", "Model", "Created"):
+            t.add_column(col)
+        for pr in rows[:40]:
+            t.add_row(str(pr.id), pr.proposal_type, pr.title[:50],
+                      str(pr.confidence or "-"), pr.model or "-", f"{pr.created_at:%Y-%m-%d}")
+        console.print(t)
+        if status == "PENDING" and rows:
+            console.print("APPLY: python -m src.main proposals accept <id> | reject <id>")
+
+
+@proposals_app.command("accept")
+def proposals_accept(
+    proposal_id: int = typer.Argument(...),
+    reason: Optional[str] = typer.Option(None, help="Required for THESIS_REVISION proposals."),
+) -> None:
+    """APPLY: human acceptance - calls the existing v2 service for this proposal type."""
+    settings = _boot()
+    from src.db.intelligence import AiProposal
+    from src.intelligence.ai.proposals import accept_proposal
+
+    with session_scope(settings.db_url) as s:
+        pr = s.get(AiProposal, proposal_id)
+        if pr is None:
+            console.print("[red]Proposal not found.[/red]")
+            raise typer.Exit(code=1)
+        res = accept_proposal(s, pr, base_currency=settings.base_currency, reason_for_revision=reason)
+    console.print(f"[green]Accepted:[/green] {res['action']}")
+
+
+@proposals_app.command("reject")
+def proposals_reject(proposal_id: int = typer.Argument(...), note: Optional[str] = typer.Option(None)) -> None:
+    settings = _boot()
+    from src.db.intelligence import AiProposal
+    from src.intelligence.ai.proposals import reject_proposal
+
+    with session_scope(settings.db_url) as s:
+        pr = s.get(AiProposal, proposal_id)
+        if pr is None:
+            console.print("[red]Proposal not found.[/red]")
+            raise typer.Exit(code=1)
+        reject_proposal(s, pr, note=note)
+    console.print("Rejected. No research data was changed.")
+
+
+@brief_app.command("daily")
+def brief_daily() -> None:
+    """Deterministic daily brief (no AI content; pending proposals listed for review)."""
+    settings = _boot()
+    from src.intelligence.briefs import daily_brief
+
+    with session_scope(settings.db_url) as s:
+        console.print(daily_brief(s, settings))
+
+
+@brief_app.command("weekly")
+def brief_weekly() -> None:
+    settings = _boot()
+    from src.intelligence.briefs import weekly_brief
+
+    with session_scope(settings.db_url) as s:
+        console.print(weekly_brief(s, settings))
+
+
+@discovery_app.command("run")
+def discovery_run() -> None:
+    """PROCESS: refresh research candidates from 13F/insider factors."""
+    settings = _boot()
+    from src.db.intelligence import ResearchCandidate
+    from src.intelligence.discovery import run_discovery
+
+    with session_scope(settings.db_url) as s:
+        res = run_discovery(s)
+        rows = list(s.scalars(select(ResearchCandidate).where(ResearchCandidate.status == "NEW")))
+        console.print(f"[green]Discovery[/green]: +{res['created']} new, {res['updated']} updated; "
+                      f"{len(rows)} open candidates")
+        import json as _json
+        for c in rows[:15]:
+            console.print(f"  {c.ticker} ({c.source}): " + "; ".join(_json.loads(c.reasons_json or "[]"))[:100])
+    console.print("Promote in the dashboard Discovery tab or: discovery promote <ticker>")
+
+
+@discovery_app.command("promote")
+def discovery_promote(ticker: str = typer.Argument(...)) -> None:
+    settings = _boot()
+    from src.db.intelligence import ResearchCandidate
+    from src.intelligence.discovery import promote_candidate
+
+    with session_scope(settings.db_url) as s:
+        c = s.scalars(select(ResearchCandidate).where(
+            ResearchCandidate.ticker == ticker.upper(), ResearchCandidate.status == "NEW")).first()
+        if c is None:
+            console.print("[red]No open candidate with that ticker.[/red]")
+            raise typer.Exit(code=1)
+        inv = promote_candidate(s, c)
+    console.print(f"[green]Promoted[/green] {inv.ticker} to research (status DISCOVERED).")
+
+
+@app.command("technical")
+def technical_cmd(ticker: str = typer.Argument(...)) -> None:
+    """Deterministic technical/market CONTEXT for an instrument (never a signal)."""
+    settings = _boot()
+    from src.db.models import Instrument
+    from src.intelligence.technical import technical_context_for_instrument
+
+    with session_scope(settings.db_url) as s:
+        inst = s.scalars(select(Instrument).where(
+            Instrument.symbol == ticker.upper(), Instrument.asset_type != "cash")).first()
+        if inst is None:
+            console.print("[red]Instrument not found in the portfolio DB.[/red]")
+            raise typer.Exit(code=1)
+        ctx = technical_context_for_instrument(s, inst.id)
+        for line in ctx.statements():
+            console.print("  " + line)
+
+
 @app.command("dashboard")
 def dashboard_cmd() -> None:
     """Launch the local Streamlit dashboard (binds to 127.0.0.1 only)."""

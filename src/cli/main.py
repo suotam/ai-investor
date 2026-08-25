@@ -733,23 +733,44 @@ def proposals_reject(proposal_id: int = typer.Argument(...), note: Optional[str]
     console.print("Rejected. No research data was changed.")
 
 
-@brief_app.command("daily")
-def brief_daily() -> None:
-    """Deterministic daily brief (no AI content; pending proposals listed for review)."""
+def _run_brief(brief_type: str, no_ai: bool, audio: bool, force: bool, preview: bool) -> None:
     settings = _boot()
-    from src.intelligence.briefs import daily_brief
+    from src.intelligence.briefing.generate import generate_brief
 
     with session_scope(settings.db_url) as s:
-        console.print(daily_brief(s, settings))
+        doc, run, md_path, audio_path = generate_brief(
+            s, settings, brief_type=brief_type, use_ai=not no_ai, audio=audio,
+            force=force, preview=preview,
+        )
+    from src.intelligence.briefing.assemble import render_markdown
+
+    console.print(render_markdown(doc))
+    console.print(f"\n[green]Saved:[/green] {md_path}" + (f" | audio: {audio_path}" if audio_path else ""))
+    if run is None:
+        console.print("[dim]Preview only - checkpoint not advanced; re-run without --preview "
+                      "on a new day (or with --force today) to record it.[/dim]")
+
+
+@brief_app.command("daily")
+def brief_daily(
+    no_ai: bool = typer.Option(False, "--no-ai", help="Skip the mentor synthesis call."),
+    audio: bool = typer.Option(True, "--audio/--no-audio", help="Also write the TTS-friendly text."),
+    force: bool = typer.Option(False, "--force", help="Regenerate today's brief (supersedes the earlier run)."),
+    preview: bool = typer.Option(False, "--preview", help="Render without recording a checkpoint."),
+) -> None:
+    """Delta-aware daily brief: what CHANGED since the last brief (static state is suppressed)."""
+    _run_brief("daily", no_ai, audio, force, preview)
 
 
 @brief_app.command("weekly")
-def brief_weekly() -> None:
-    settings = _boot()
-    from src.intelligence.briefs import weekly_brief
-
-    with session_scope(settings.db_url) as s:
-        console.print(weekly_brief(s, settings))
+def brief_weekly(
+    no_ai: bool = typer.Option(False, "--no-ai"),
+    audio: bool = typer.Option(True, "--audio/--no-audio"),
+    force: bool = typer.Option(False, "--force"),
+    preview: bool = typer.Option(False, "--preview"),
+) -> None:
+    """Weekly mentor review: deltas since last weekly + performance, health, KPIs, regime, calibration."""
+    _run_brief("weekly", no_ai, audio, force, preview)
 
 
 @discovery_app.command("run")
@@ -784,6 +805,188 @@ def discovery_promote(ticker: str = typer.Argument(...)) -> None:
             raise typer.Exit(code=1)
         inv = promote_candidate(s, c)
     console.print(f"[green]Promoted[/green] {inv.ticker} to research (status DISCOVERED).")
+
+
+earnings_app = typer.Typer(help="Issuer-specific earnings extraction & comparison (deterministic).")
+app.add_typer(earnings_app, name="earnings")
+mentor_app = typer.Typer(help="AI mentor reviews (proposals/text only; never mutations).")
+app.add_typer(mentor_app, name="mentor")
+
+
+@earnings_app.command("extract")
+def earnings_extract(
+    ticker: str = typer.Argument(...),
+    file: Optional[Path] = typer.Option(None, "--file", help="Local HTML/text earnings release."),
+    doc_id: Optional[int] = typer.Option(None, "--doc", help="Archived source_documents id."),
+    accession: Optional[str] = typer.Option(None, "--accession", help="SEC accession: download all filing documents (incl. exhibits) and extract."),
+    period: str = typer.Option(..., "--period", help="e.g. 2026Q2"),
+    period_end: Optional[str] = typer.Option(None, help="Period end date YYYY-MM-DD."),
+) -> None:
+    """Extract issuer-specific KPIs from a primary document into KPI observations (with provenance)."""
+    settings = _boot()
+    from datetime import date as _date
+
+    from src.db.intelligence import SourceDocument
+    from src.intelligence.earnings import compare_kpis, comparison_table_text, flag_contradictions, run_extraction
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        source_doc = None
+        if accession is not None:
+            from src.db.models import Instrument
+            from src.intelligence.connectors.sec import SecClient, filing_url, list_filing_files
+            from src.intelligence.entities import _provider_ids
+            from src.intelligence.provenance import register_source
+
+            inst = s.get(Instrument, inv.instrument_id) if inv.instrument_id else None
+            cik = _provider_ids(inst).get("sec_cik") if inst else None
+            if not cik:
+                console.print("[red]No CIK known for this investment - run `sec sync` first.[/red]")
+                raise typer.Exit(code=1)
+            client = SecClient(settings)
+            files = [f for f in list_filing_files(client, cik, accession)
+                     if f.lower().endswith((".htm", ".html", ".txt")) and "index" not in f.lower()][:12]
+            parts = []
+            for fname in files:
+                try:
+                    parts.append(client.get(filing_url(cik, accession, fname)).decode("utf-8", errors="replace"))
+                except Exception as exc:
+                    console.print(f"  [yellow]skip {fname}: {exc}[/yellow]")
+            raw = "\n".join(parts)
+            source_doc, _created = register_source(
+                s, settings, provider="sec_edgar", source_type="filing", external_id=accession,
+                raw=raw.encode("utf-8"), category="sec", entity_key=cik, source_tier=1,
+                title=f"filing {accession} (all documents)",
+            )
+            console.print(f"Downloaded {len(files)} document(s) from accession {accession}.")
+        elif doc_id is not None:
+            source_doc = s.get(SourceDocument, doc_id)
+            if source_doc is None or not source_doc.raw_path:
+                console.print("[red]Source document not found or has no archived raw payload.[/red]")
+                raise typer.Exit(code=1)
+            raw = Path(source_doc.raw_path).read_text(encoding="utf-8", errors="replace")
+        elif file is not None:
+            raw = file.read_text(encoding="utf-8", errors="replace")
+        else:
+            console.print("[red]Provide --file or --doc.[/red]")
+            raise typer.Exit(code=2)
+        res = run_extraction(
+            s, inv, raw, period=period,
+            period_date=_date.fromisoformat(period_end) if period_end else None,
+            source_document=source_doc,
+        )
+        comps = compare_kpis(s, inv)
+        created = flag_contradictions(s, inv, comps)
+        console.print(f"[green]Extracted[/green] ({res.extractor}): stored {len(res.stored)}, "
+                      f"duplicates {len(res.duplicates)}, ambiguous {len(res.ambiguous)}, "
+                      f"unmatched {len(res.unmatched_kpi_names)}")
+        for line in res.stored:
+            console.print(f"  + {line}")
+        for a in res.ambiguous:
+            console.print(f"  [yellow]ambiguous -> review proposal:[/yellow] {a}")
+        if created:
+            console.print(f"[yellow]{len(created)} KPI value(s) outside thesis expectations -> "
+                          "ASSUMPTION review proposal(s) created (nothing changed automatically).[/yellow]")
+        console.print("\n" + comparison_table_text(comps))
+
+
+@earnings_app.command("compare")
+def earnings_compare(ticker: str = typer.Argument(...)) -> None:
+    """Deterministic KPI comparison: current vs previous quarter vs year-ago vs thesis expectation."""
+    settings = _boot()
+    from src.intelligence.earnings import compare_kpis, comparison_table_text
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        console.print(comparison_table_text(compare_kpis(s, inv)) or "No KPI observations with period dates.")
+
+
+@mentor_app.command("review")
+def mentor_review(ticker: str = typer.Argument(...)) -> None:
+    """Decision-quality review: process over outcome (deterministic discipline stats + AI mentor)."""
+    settings = _boot()
+    from src.intelligence.ai.provider import AIInvalidOutput, AIUnavailable, get_ai_provider
+    from src.intelligence.briefing.decision_quality import journal_discipline, run_decision_review
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        disc = journal_discipline(s, inv)
+        console.print(f"Journal discipline: {disc.decisions} decision(s); reasoning {disc.with_reasoning}, "
+                      f"falsifier {disc.with_falsifier}, alternatives {disc.with_alternatives}, "
+                      f"confidence {disc.with_confidence}, key risks {disc.with_key_risks}")
+        for n in disc.notes:
+            console.print(f"  [yellow]-[/yellow] {n}")
+        try:
+            provider = get_ai_provider(settings)
+            review = run_decision_review(s, provider, inv)
+        except (AIUnavailable, AIInvalidOutput) as exc:
+            console.print(f"[yellow]AI mentor unavailable:[/yellow] {exc}")
+            return
+        for label, text in (
+            ("Overall", review.overall_observations), ("Reasoning consistency", review.reasoning_consistency),
+            ("Luck vs skill", review.luck_vs_skill), ("Ignored risks", review.ignored_risks),
+            ("Confidence justified?", review.confidence_justified),
+            ("Followed original thesis?", review.followed_original_thesis),
+            ("Story drift", review.story_drift), ("Sizing vs uncertainty", review.sizing_vs_uncertainty),
+        ):
+            console.print(f"[bold]{label}:[/bold] {text}")
+        for q in review.questions_for_the_investor:
+            console.print(f"  ? {q}")
+
+
+@mentor_app.command("red-team")
+def mentor_red_team(ticker: str = typer.Argument(...)) -> None:
+    """Alias for `ai redteam` (adversarial thesis attack -> proposals)."""
+    ai_redteam(ticker)
+
+
+@app.command("calibration")
+def calibration_cmd() -> None:
+    """Prediction calibration (honest about small samples)."""
+    settings = _boot()
+    from src.intelligence.briefing.calibration import calibration_report
+
+    with session_scope(settings.db_url) as s:
+        rep = calibration_report(s)
+    if not rep.sufficient:
+        console.print(rep.note)
+        return
+    console.print(f"Resolved: {rep.resolved} | Brier score: {rep.brier_score} | hit rate {rep.hit_rate:.0%}")
+    for b in rep.buckets:
+        console.print(f"  {b['bucket']}: stated ~{b['avg_stated_probability']}% vs observed "
+                      f"{b['observed_frequency_pct']}% (n={b['n']})")
+    console.print(f"[dim]{rep.note}[/dim]")
+
+
+@app.command("feedback")
+def feedback_cmd(
+    item_key: str = typer.Argument(..., help="Brief item key (shown in the Today page)."),
+    rating: str = typer.Argument(..., help="USEFUL | NOT_USEFUL | TOO_NOISY | MORE_LIKE_THIS"),
+    note: Optional[str] = typer.Option(None),
+) -> None:
+    """Record human feedback on a surfaced item (stored only; nothing retrains automatically)."""
+    settings = _boot()
+    from src.db.briefing import FEEDBACK_RATINGS, BriefFeedback
+
+    rating = rating.upper()
+    if rating not in FEEDBACK_RATINGS:
+        console.print(f"[red]rating must be one of {FEEDBACK_RATINGS}[/red]")
+        raise typer.Exit(code=2)
+    with session_scope(settings.db_url) as s:
+        s.add(BriefFeedback(item_key=item_key, rating=rating, note=note))
+    console.print("Feedback stored.")
 
 
 @app.command("technical")

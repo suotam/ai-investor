@@ -65,3 +65,17 @@ intelligence:
     - {code: MEXCPIALLMINMEI, name: "Mexico CPI",           unit: "index", frequency: monthly}
     # Limitation: no reliable key-free FRED series found for Mexico policy rate and Brazil
     # unemployment (previous OECD codes were discontinued); add via another provider later.
+
+# ---- v4 mentor & briefing ----
+briefing:
+  output_dir: output/briefs
+  daily:
+    price_move_pct: 5            # single-position price move worth surfacing
+    portfolio_move_pct: 2        # whole-portfolio value move vs last brief
+    portfolio_weight_change_pp: 1
+    insider_min_value_usd: 100000
+    macro_change_pct: 2          # change vs previous observation of a LINKED series
+    valuation_band_pct: 10       # price within this % of a scenario target = threshold zone
+    max_items: 10
+  weekly:
+    max_items: 25

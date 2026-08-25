@@ -253,3 +253,10 @@ def list_filings(session, cik: str | None = None, ticker_entity: str | None = No
     if cik:
         stmt = stmt.where(SourceDocument.entity_key == normalize_cik(cik))
     return list(session.scalars(stmt.order_by(SourceDocument.published_at.desc())))
+
+def list_filing_files(client: SecClient, cik: str, accession: str) -> list[str]:
+    """Filenames inside one filing via the archive index.json (official endpoint)."""
+    url = ARCHIVES_URL.format(cik=normalize_cik(cik), accession_nodash=accession.replace("-", ""), filename="index.json")
+    data = client.get_json(url)
+    items = ((data.get("directory") or {}).get("item")) or []
+    return [i.get("name") for i in items if i.get("name")]

@@ -24,3 +24,6 @@ dist/
 .vscode/
 .idea/
 *.swp
+
+# Generated briefs
+output/

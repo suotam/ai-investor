@@ -266,7 +266,8 @@ def test_kpi_bridge_deterministic_vs_suggested_vs_unsupported(session, settings)
     kpis.add_kpi(session, inv, "NPL 90+", unit="%")                # unsupported (issuer-specific)
     store_facts(session, parse_companyfacts(json.loads(COMPANYFACTS_JSON)), None)
     session.commit()
-    res = apply_kpi_bridge(session, inv, "1691493")
+    overrides = {"Net income": ("net_income", ("USD",), 1.0)}  # opt-in: verified mapping
+    res = apply_kpi_bridge(session, inv, "1691493", overrides=overrides)
     session.commit()
     assert res.deterministic == ["Net income"] and res.observations_created == 1
     assert res.suggested == ["Adjusted net income margin"]
@@ -279,7 +280,7 @@ def test_kpi_bridge_deterministic_vs_suggested_vs_unsupported(session, settings)
     prop = session.scalars(select(AiProposal).where(AiProposal.proposal_type == "KPI_MAPPING")).one()
     assert prop.status == "PENDING"
     # re-run: no duplicate observations, no duplicate proposals (existing never overwritten)
-    res2 = apply_kpi_bridge(session, inv, "1691493")
+    res2 = apply_kpi_bridge(session, inv, "1691493", overrides=overrides)
     assert res2.observations_created == 0 and res2.observations_duplicate == 1
     assert session.scalar(select(func.count(AiProposal.id))) == 1
 

@@ -24,6 +24,7 @@ def settings(tmp_path: Path) -> Settings:
         raw_dir=tmp_path / "raw",
         log_path=tmp_path / "test.log",
     )
+    s.brief_output_dir = tmp_path / "briefs"
     return s
 
 

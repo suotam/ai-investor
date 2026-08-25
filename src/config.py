@@ -43,6 +43,16 @@ class Settings:
     ai_timeout_seconds: float = 120.0
     ai_temperature: float = 0.2
     macro_default_series: list[dict] = field(default_factory=list)
+    # v4 briefing thresholds (delta materiality)
+    brief_price_move_pct: float = 5.0
+    brief_weight_change_pp: float = 1.0
+    brief_portfolio_move_pct: float = 2.0
+    brief_insider_min_value_usd: float = 100000.0
+    brief_macro_change_pct: float = 2.0
+    brief_valuation_band_pct: float = 10.0
+    brief_daily_max_items: int = 10
+    brief_weekly_max_items: int = 25
+    brief_output_dir: Path = PROJECT_ROOT / "output" / "briefs"
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8501
     log_path: Path = PROJECT_ROOT / "logs" / "investor.log"
@@ -59,6 +69,10 @@ class Settings:
 def _resolve(p: str | Path) -> Path:
     path = Path(p)
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _bday(raw: dict, key: str, default):
+    return ((raw.get("briefing") or {}).get("daily") or {}).get(key, default)
 
 
 def load_settings(config_path: str | Path | None = None) -> Settings:
@@ -103,6 +117,15 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         ai_timeout_seconds=float(ai.get("timeout_seconds", 120)),
         ai_temperature=float(ai.get("temperature", 0.2)),
         macro_default_series=list(intel.get("macro_series") or []),
+        brief_price_move_pct=float(_bday(raw, "price_move_pct", 5.0)),
+        brief_weight_change_pp=float(_bday(raw, "portfolio_weight_change_pp", 1.0)),
+        brief_portfolio_move_pct=float(_bday(raw, "portfolio_move_pct", 2.0)),
+        brief_insider_min_value_usd=float(_bday(raw, "insider_min_value_usd", 100000)),
+        brief_macro_change_pct=float(_bday(raw, "macro_change_pct", 2.0)),
+        brief_valuation_band_pct=float(_bday(raw, "valuation_band_pct", 10.0)),
+        brief_daily_max_items=int(_bday(raw, "max_items", 10)),
+        brief_weekly_max_items=int(((raw.get("briefing") or {}).get("weekly") or {}).get("max_items", 25)),
+        brief_output_dir=_resolve(((raw.get("briefing") or {}).get("output_dir")) or "output/briefs"),
         dashboard_host=dash.get("host", "127.0.0.1"),
         dashboard_port=int(dash.get("port", 8501)),
         log_path=_resolve(lg.get("path", "logs/investor.log")),

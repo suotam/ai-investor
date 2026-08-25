@@ -10,6 +10,11 @@ A **local-first, read-only, deterministic** personal investment platform.
   pipeline), immutable thesis versions, explicit assumptions, risks, catalysts, thesis
   breakers, evidence, KPIs, valuation scenarios, an immutable decision journal, predictions
   and a deterministic review/health system. Fully usable **without any AI**.
+* **v4 — mentor & briefing layer**: delta-aware daily/weekly briefs ("what changed", never
+  a database dump), persistent brief checkpoints with alert hygiene, issuer-specific KPI
+  extraction from primary earnings documents (NU extractor), deterministic earnings
+  comparison, valuation/macro/technical relevance, decision-quality mentor, calibration,
+  human feedback and a Today dashboard homepage. AI = one compact local synthesis call.
 * **v3 — intelligence layer**: external primary-source data with full provenance (SEC/EDGAR
   filings + XBRL, FRED macro, Form 4 insiders, 13F, congressional CSV imports, news provider
   interface), a deterministic intelligence-event inbox, technical context, discovery
@@ -384,6 +389,108 @@ All manual entry (investments, theses, revisions, assumptions, KPIs, evidence, r
 catalysts, breakers, valuations, decisions, predictions, red team, pre-mortem) happens in
 the dashboard Research page forms.
 
+## Mentor & briefing layer (v4)
+
+### Delta, not state
+The daily brief answers "what changed since the previous meaningful checkpoint", never
+"what exists in the database". `brief_runs` are persistent checkpoints; the deterministic
+delta engine (`src/intelligence/briefing/deltas.py`) compares current state against the
+last completed run and emits typed deltas (new events/evidence/KPIs, assumption status
+changes, risk changes, breaker triggers, proposals, decisions, predictions due/resolved,
+reviews due, discovery candidates, linked-macro moves, price/weight/portfolio moves above
+thresholds, valuation zone changes). Python decides what is new - never the LLM.
+
+### Alert hygiene
+Suppression rules (`hygiene.py`): an item_key surfaced in a completed brief never repeats;
+standing conditions (review due, prediction due) resurface as a reminder after 7 days;
+human triage (SEEN / DEFER until date / RESOLVE) is available on the Today page. A
+long-standing HIGH risk appears once when created and then only when something about it
+changes (new targeted evidence, escalation). Every brief reports how many unchanged items
+were suppressed. A no-change day produces exactly: "No material thesis-relevant
+developments since the previous brief." - by design a good output.
+
+### Re-run semantics
+Same-day re-run = preview over the same window (checkpoint untouched); `--force`
+supersedes today's run and reproduces the same items; the next day always starts from the
+last completed checkpoint. No false "new" deltas from regenerations.
+
+### Issuer-specific KPI extraction
+`src/intelligence/issuer_extractors/` is a plugin registry (never hardcoded into core).
+The NU extractor (v1.1) deterministically parses Nu's earnings-release language for
+Customers, Active/Mexico customers, ARPAC, Loan portfolio & growth, 15-90/90+ NPL,
+risk-adjusted NIM, ROE and Net income - with country-context exclusions ("Mexico ...
+customers" never feeds the global KPI) and an "adjusted" exclusion for net income. Every
+stored observation carries the exact source excerpt + document reference; million/billion
+values are reconciled to the KPI's own unit. Exactly one consistent match is required -
+conflicting matches become a KPI_OBSERVATION review proposal, values are never guessed.
+Validated against the real NU Q2 2026 6-K: 10 KPIs extracted deterministically, ARPAC-like
+ambiguities correctly deferred to review.
+
+`earnings extract NU --accession <sec-accession> --period 2026Q2` downloads all documents
+of a filing (exhibits included), archives them and extracts; `--file`/`--doc` work offline.
+
+### Earnings comparison
+`earnings compare NU`: current vs previous quarter vs year-ago vs the thesis expectation
+(assumption expected_min/max linked via kpi_id). Out-of-range values create an
+ASSUMPTION_STATUS_CHANGE review proposal - the assumption itself never changes
+automatically. KPIs moving against their good direction are flagged as information.
+
+### Mentor synthesis
+One compact Glimmer call per brief (never per event): input = the pre-filtered deltas +
+one-line thesis summaries, nothing else. Style contract: calm, skeptical, source-grounded,
+no hype, explicitly distinguishes PRICE from BUSINESS changes and says what is noise ("no
+action required" is a first-class conclusion). Output is validated JSON; provider, model,
+prompt version and context hash are stored on the brief run. AI down -> deterministic
+brief plus the note "AI mentor synthesis unavailable." - the brief never fails.
+
+### Outputs
+`output/briefs/YYYY-MM-DD-daily.md` and `...-daily-audio.txt` (natural prose for TTS,
+no tables/markdown, ~5-10 min). Weekly adds: performance vs benchmark (TWR index), thesis
+health per investment, contradicting evidence of the week, full KPI comparison, macro
+regime dimensions (Growth/Inflation/Rates/Liquidity/Credit/Labor/USD - each
+IMPROVING/STABLE/DETERIORATING/UNKNOWN by a documented rule over FRED series, never one
+magic label), decisions of the week, calibration and "what would change my mind" questions
+derived from breakers and weak assumptions.
+
+### Decision quality & calibration
+`mentor review NU`: deterministic journal-discipline stats (how many decisions recorded a
+falsifier, alternatives, confidence) + an AI review of process quality (consistency, luck
+vs skill, ignored risks, story drift, sizing) that never judges by P/L alone.
+`calibration`: Brier score, hit rate and probability buckets - only when >= 10 resolved
+predictions exist, otherwise "Insufficient sample".
+
+### Today dashboard & feedback
+The Today page (first in the sidebar) shows the last brief, needs-your-judgment, each
+surfaced item with its "why am I seeing this" reason and source references, defer/resolve
+triage and feedback buttons (USEFUL / NOT_USEFUL / TOO_NOISY / MORE_LIKE_THIS - stored
+only, nothing retrains automatically). Management claims (`management_claims`) store
+sourced guidance statements for future promise-vs-outcome tracking; a source is mandatory.
+
+### v4 commands
+
+```powershell
+python -m src.main brief daily [--no-ai] [--no-audio] [--force] [--preview]
+python -m src.main brief weekly [--no-ai]
+python -m src.main earnings extract NU --accession 0001292814-26-004222 --period 2026Q2 --period-end 2026-06-30
+python -m src.main earnings compare NU
+python -m src.main mentor review NU
+python -m src.main mentor red-team NU
+python -m src.main calibration
+python -m src.main feedback <item_key> TOO_NOISY
+```
+
+Thresholds live in `config/settings.yaml` under `briefing:` (price/portfolio/weight moves,
+insider USD floor, macro change %, valuation band, max items).
+
+### v4 limitations
+* Issuer extractors exist for NU only; other issuers fall back to manual/XBRL proposals.
+* The XBRL->KPI auto-bridge is opt-in per investment (real-world validation showed money
+  concepts can carry context/scale ambiguity); issuer extractors are the preferred
+  deterministic source for money KPIs.
+* Management claims and congressional data remain manual imports.
+* TTS itself is not bundled - the audio file is TTS-ready text.
+* Technical context approximates highs/lows from closes.
+
 ## Intelligence layer (v3)
 
 ### Pipeline & safety
@@ -562,7 +669,7 @@ no daemon required)
 python -m pytest
 ```
 
-112 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
+144 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
 archiving/audit, instrument resolution, cash ledger, average-cost/short/cross-zero/FIFO engine,
 valuation & weights, FX (direct/inverse/cross/staleness/unavailable), price cache incrementality,
 value history, TWR/simple/XIRR/drawdown on hand-checkable scenarios, snapshot idempotency, crypto
@@ -628,10 +735,10 @@ resolutions are all **manual**. There is no automatic earnings/SEC/news/insider/
 are v3+. Free-form breaker conditions are not machine-evaluated. Calibration shows simple
 counts only. Deleting research rows is not exposed in the UI (immutability first).
 
-## What v4 should do next
+## What v5 should do next
 
-Earnings-release parsing for issuer-specific KPIs (NU: customers, ARPAC, NPL - from 6-K
-exhibits/IR PDFs) feeding the existing KPI bridge; transcript ingestion; a live congressional
-provider; scheduled automation (Task Scheduler recipes); calibration statistics once enough
-predictions resolve; and on the portfolio side broker-side reconciliation
-(CashReport/OpenPositions) and corporate actions.
+Transcript ingestion feeding management_claims automatically; TTS integration for the audio
+brief; issuer extractors for further holdings; scheduled automation recipes (Task Scheduler);
+richer discovery factors once a fundamentals data source exists; a live congressional
+provider; and on the portfolio side broker-side reconciliation (CashReport/OpenPositions)
+and corporate actions.

@@ -69,7 +69,11 @@ def register_source(
     if raw is not None:
         raw_path, digest = archive_raw(settings, category or provider, f"{source_type}_{external_id}", raw)
     if doc is not None:
-        if digest and doc.sha256 and digest != doc.sha256:
+        if raw_path is not None and doc.raw_path is None:
+            # backfill: the document was registered from an index without its payload
+            doc.raw_path, doc.sha256 = str(raw_path), digest
+            session.flush()
+        elif digest and doc.sha256 and digest != doc.sha256:
             meta = json.loads(doc.metadata_json) if doc.metadata_json else {}
             revs = meta.setdefault("revised_payloads", [])
             entry = {"sha256": digest, "path": str(raw_path), "retrieved_at": utcnow().isoformat()}

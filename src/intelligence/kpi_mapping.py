@@ -28,16 +28,13 @@ from src.research.investments import ResearchError
 
 log = get_logger("intelligence.kpi_mapping")
 
-# Deterministic bridge: lowercase KPI name -> (normalized metric, expected units, scale)
-# Only metrics whose economic meaning is unambiguous belong here.
-KPI_BRIDGE: dict[str, tuple[str, tuple[str, ...], float]] = {
-    "net income": ("net_income", ("USD",), 1.0),
-    "net income (usd m)": ("net_income", ("USD",), 1e-6),
-    "revenue": ("revenue", ("USD",), 1.0),
-    "revenue (usd m)": ("revenue", ("USD",), 1e-6),
-    "total assets": ("total_assets", ("USD",), 1.0),
-    "eps": ("eps_diluted", ("USD/shares",), 1.0),
-}
+# Deterministic bridge: lowercase KPI name -> (normalized metric, expected units, scale).
+# EMPTY BY DEFAULT since real-world validation showed XBRL money concepts can carry
+# context/scale ambiguity (consolidated vs parent, restatements). Enable per investment via
+# the `overrides` parameter after verifying units and context; name-based matches still
+# produce KPI_MAPPING proposals for human review. Issuer earnings extractors are the
+# preferred deterministic source for money KPIs.
+KPI_BRIDGE: dict[str, tuple[str, tuple[str, ...], float]] = {}
 
 SUGGEST_HINTS: dict[str, str] = {  # loose name fragments -> metric (proposal only, never auto)
     "income": "net_income",

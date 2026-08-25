@@ -989,6 +989,448 @@ def feedback_cmd(
     console.print("Feedback stored.")
 
 
+run_app = typer.Typer(help="Unified pipelines: one command runs the Investor OS day/week.")
+app.add_typer(run_app, name="run")
+
+
+@run_app.command("daily")
+def run_daily_cmd(
+    no_ai: bool = typer.Option(False, "--no-ai", help="Skip AI stages."),
+    no_sync: bool = typer.Option(False, "--no-sync", help="Skip external provider syncs (offline mode)."),
+    no_audio: bool = typer.Option(False, "--no-audio"),
+) -> None:
+    """DOWNLOAD -> PROCESS -> AI ANALYZE -> BRIEF, with per-stage status. Idempotent."""
+    settings = _boot()
+    from src.operations.pipeline import run_daily
+
+    report = run_daily(settings, use_ai=not no_ai, audio=not no_audio, sync_external=not no_sync)
+    console.print(report.format())
+    raise typer.Exit(code=0 if report.status in ("SUCCESS", "PARTIAL") else 1)
+
+
+@run_app.command("weekly")
+def run_weekly_cmd(
+    no_ai: bool = typer.Option(False, "--no-ai"),
+    no_sync: bool = typer.Option(False, "--no-sync"),
+) -> None:
+    """Daily-type sync first, then the weekly mentor review + risk + claims check."""
+    settings = _boot()
+    from src.operations.pipeline import run_weekly
+
+    report = run_weekly(settings, use_ai=not no_ai, sync_external=not no_sync)
+    console.print(report.format())
+    raise typer.Exit(code=0 if report.status in ("SUCCESS", "PARTIAL") else 1)
+
+
+@app.command("doctor")
+def doctor_cmd() -> None:
+    """Data-integrity and configuration checks (read-only; OK / WARN / FAIL)."""
+    settings = _boot()
+    from src.operations.doctor import overall_status, run_doctor
+
+    checks = run_doctor(settings)
+    colors = {"OK": "green", "WARN": "yellow", "FAIL": "red"}
+    for c in checks:
+        console.print(f"[{colors[c.status]}]{c.status:<5}[/{colors[c.status]}] {c.name}"
+                      + (f" — {c.detail}" if c.detail else ""))
+    overall = overall_status(checks)
+    console.print(f"\nOverall: [{colors[overall]}]{overall}[/{colors[overall]}]")
+    raise typer.Exit(code=0 if overall != "FAIL" else 1)
+
+
+@app.command("backup")
+def backup_cmd(kind: str = typer.Option("daily", help="daily | weekly (affects rotation slot)")) -> None:
+    """Create a rotating local SQLite backup (kept in data/backups, never committed)."""
+    settings = _boot()
+    from src.operations.backups import create_backup
+
+    path = create_backup(settings, kind)
+    console.print(f"[green]Backup:[/green] {path}" if path else "[red]No database to back up.[/red]")
+
+
+transcript_app = typer.Typer(help="Earnings transcript / management text import (manual, sourced).")
+app.add_typer(transcript_app, name="transcript")
+claims_app = typer.Typer(help="Management claims: extraction, outcome linking, track record.")
+app.add_typer(claims_app, name="claims")
+company_app = typer.Typer(help="Company onboarding utilities.")
+app.add_typer(company_app, name="company")
+extractor_app = typer.Typer(help="Issuer-extractor development tooling.")
+app.add_typer(extractor_app, name="extractor")
+stress_app = typer.Typer(help="Deterministic scenario stress tests (mechanical, not forecasts).")
+app.add_typer(stress_app, name="stress")
+research_app = typer.Typer(help="Open research questions and local source search.")
+app.add_typer(research_app, name="research")
+
+
+@transcript_app.command("import")
+def transcript_import(
+    ticker: str = typer.Argument(...),
+    file: Path = typer.Argument(..., exists=True, readable=True),
+    source_name: str = typer.Option(..., "--source", help="e.g. 'Q2 2026 earnings call (company webcast)'"),
+    claim_date: Optional[str] = typer.Option(None, help="Statement date YYYY-MM-DD."),
+    speaker: Optional[str] = typer.Option(None),
+    speaker_role: Optional[str] = typer.Option(None),
+) -> None:
+    """Import a transcript/management text: archive with provenance + extract forward-looking
+    claims deterministically (verbatim quotes). Only store what source rights permit."""
+    settings = _boot()
+    from datetime import date as _date
+
+    from src.intelligence.claims import ingest_claims_from_source
+    from src.intelligence.issuer_extractors import html_to_text
+    from src.intelligence.provenance import register_source
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        raw = file.read_bytes()
+        doc, _created = register_source(
+            s, settings, provider="manual", source_type="transcript",
+            external_id=f"{ticker.upper()}:{file.name}", raw=raw, category="news",
+            title=source_name, entity_key=ticker.upper(), source_tier=1,
+        )
+        text = html_to_text(raw.decode("utf-8", errors="replace"))
+        claims = ingest_claims_from_source(
+            s, inv, text, source_document_id=doc.id, source_reference=source_name,
+            claim_date=_date.fromisoformat(claim_date) if claim_date else None,
+            speaker=speaker, speaker_role=speaker_role,
+        )
+    console.print(f"[green]Transcript archived[/green] (source_documents:{doc.id}); "
+                  f"{len(claims)} forward-looking claim(s) captured:")
+    for c in claims:
+        console.print(f"  [{c.claim_type}] {c.statement[:100]}")
+
+
+@claims_app.command("list")
+def claims_list(ticker: str = typer.Argument(...), status: Optional[str] = typer.Option(None)) -> None:
+    settings = _boot()
+    from src.intelligence.claims import list_claims
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        rows = list_claims(s, inv, status=status) if inv else []
+        t = Table(title=f"Management claims — {ticker.upper()}")
+        for col in ("Id", "Type", "Status", "Date", "Horizon", "Statement"):
+            t.add_column(col)
+        for c in rows:
+            t.add_row(str(c.id), c.claim_type, c.status, str(c.claim_date or "-"),
+                      c.time_horizon or "-", c.statement[:70])
+        console.print(t)
+
+
+@claims_app.command("link")
+def claims_link(
+    claim_id: int = typer.Argument(...),
+    target: str = typer.Argument(..., help="e.g. kpi_observation:22 or evidence:5"),
+    status: Optional[str] = typer.Option(None, help="CONFIRMED | PARTIALLY_CONFIRMED | MISSED | SUPERSEDED | AMBIGUOUS"),
+    note: Optional[str] = typer.Option(None),
+) -> None:
+    """Link a claim to later evidence/KPI outcome and (optionally) judge it."""
+    settings = _boot()
+    from src.db.briefing import ManagementClaim
+    from src.intelligence.claims import link_claim_outcome
+
+    ttype, _, tid = target.partition(":")
+    with session_scope(settings.db_url) as s:
+        claim = s.get(ManagementClaim, claim_id)
+        if claim is None:
+            console.print("[red]Claim not found.[/red]")
+            raise typer.Exit(code=1)
+        link_claim_outcome(s, claim, ttype, int(tid), note=note, new_status=status)
+    console.print(f"[green]Linked[/green] claim #{claim_id} -> {target}"
+                  + (f" (status {status})" if status else ""))
+
+
+@claims_app.command("track-record")
+def claims_track_record(ticker: str = typer.Argument(...)) -> None:
+    settings = _boot()
+    from src.intelligence.claims import track_record
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        rep = track_record(s, inv) if inv else None
+    if not rep:
+        console.print("[red]Investment not found.[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"Claims: {rep['total']} total, {rep['open']} open, {rep['resolved']} resolved"
+                  + (f", hit rate {rep['hit_rate']:.0%}" if rep["hit_rate"] is not None else ""))
+    for k, v in rep["by_status"].items():
+        console.print(f"  {k}: {v}")
+    for e in rep["examples"][:6]:
+        console.print(f"  [{e['type']}/{e['status']}] {e['statement'][:90]}")
+    console.print(f"[dim]{rep['note']}[/dim]")
+
+
+@earnings_app.command("preview")
+def earnings_preview_cmd(ticker: str = typer.Argument(...)) -> None:
+    """Pre-earnings checklist (deterministic; nothing fabricated)."""
+    settings = _boot()
+    from src.intelligence.earnings_workflows import earnings_preview
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        console.print(earnings_preview(s, settings, inv))
+
+
+@earnings_app.command("postmortem")
+def earnings_postmortem_cmd(
+    ticker: str = typer.Argument(...),
+    period: Optional[str] = typer.Option(None, help="e.g. 2026Q2 (default: latest)"),
+) -> None:
+    """Post-earnings review: actual vs previous vs our expectation vs consensus (if stored)."""
+    settings = _boot()
+    from src.intelligence.earnings_workflows import earnings_postmortem
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        console.print(earnings_postmortem(s, settings, inv, period))
+
+
+@company_app.command("onboard")
+def company_onboard(ticker: str = typer.Argument(...)) -> None:
+    """Resolve identity, sync filings/facts, report coverage gaps, write extractor TODO."""
+    settings = _boot()
+    from src.intelligence.onboarding import onboard_company
+
+    with session_scope(settings.db_url) as s:
+        report = onboard_company(s, settings, ticker)
+    console.print(f"[bold]{report['ticker']}[/bold] — {report.get('issuer', 'unknown issuer')}")
+    console.print(f"  Instrument: {report['instrument']}")
+    console.print(f"  CIK: {report.get('cik')} | filer type: {report.get('filer_type')}")
+    console.print(f"  Forms: {', '.join(report.get('forms_seen', []))}")
+    console.print(f"  XBRL facts: {report.get('xbrl_facts', 0)} | standard metrics: "
+                  f"{', '.join(report.get('standard_metrics_available', [])) or 'none'}")
+    console.print(f"  Issuer extractor: {report.get('issuer_extractor') or '[yellow]none - see TODO[/yellow]'}")
+    if report.get("kpis_without_automatic_source"):
+        console.print("  KPIs without automatic source: " + ", ".join(report["kpis_without_automatic_source"]))
+    for f in report.get("files", []):
+        console.print(f"  [green]written:[/green] {f}")
+    for w in report.get("warnings", []):
+        console.print(f"  [yellow]{w}[/yellow]")
+
+
+@extractor_app.command("inspect")
+def extractor_inspect(
+    ticker: str = typer.Argument(...),
+    file: Optional[Path] = typer.Option(None, "--file"),
+    doc_id: Optional[int] = typer.Option(None, "--doc"),
+) -> None:
+    """Show numeric KPI-candidate contexts in a source document (extractor development aid)."""
+    settings = _boot()
+    from src.db.intelligence import SourceDocument
+    from src.intelligence.extractor_assistant import format_inspection, inspect_candidates
+    from src.research.investments import get_by_ticker
+    from src.research.kpis import list_kpis
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        kpi_names = [k.name for k in list_kpis(s, inv)] if inv else []
+        if doc_id is not None:
+            doc = s.get(SourceDocument, doc_id)
+            if doc is None or not doc.raw_path:
+                console.print("[red]Document not found or no raw payload.[/red]")
+                raise typer.Exit(code=1)
+            raw = Path(doc.raw_path).read_text(encoding="utf-8", errors="replace")
+        elif file is not None:
+            raw = file.read_text(encoding="utf-8", errors="replace")
+        else:
+            console.print("[red]Provide --file or --doc.[/red]")
+            raise typer.Exit(code=2)
+    console.print(format_inspection(inspect_candidates(raw, kpi_names)))
+
+
+@mentor_app.command("add-review")
+def mentor_add_review(ticker: str = typer.Argument(...)) -> None:
+    """'Should I add?' — deterministic facts + AI considerations. Never an order."""
+    _position_review(ticker, "add")
+
+
+@mentor_app.command("exit-review")
+def mentor_exit_review(ticker: str = typer.Argument(...)) -> None:
+    """'Should I sell?' — thesis broken? valuation extreme? or just price noise?"""
+    _position_review(ticker, "exit")
+
+
+def _position_review(ticker: str, mode: str) -> None:
+    settings = _boot()
+    from src.intelligence.ai.provider import AIInvalidOutput, AIUnavailable, get_ai_provider
+    from src.intelligence.briefing.mentor_workflows import add_review, exit_review
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        if inv is None:
+            console.print("[red]Investment not found.[/red]")
+            raise typer.Exit(code=1)
+        from src.intelligence.briefing.mentor_workflows import _position_facts
+
+        facts = _position_facts(s, settings, inv)
+        console.print("[bold]Deterministic facts:[/bold]")
+        console.print_json(json.dumps(facts, default=str))
+        try:
+            provider = get_ai_provider(settings)
+            _f, review = (add_review if mode == "add" else exit_review)(s, settings, provider, inv)
+        except (AIUnavailable, AIInvalidOutput) as exc:
+            console.print(f"[yellow]AI mentor unavailable ({exc}) - facts above remain valid.[/yellow]")
+            return
+        console.print(f"[bold]Summary:[/bold] {review.summary}")
+        for label, items in (("For", review.arguments_for), ("Against", review.arguments_against),
+                             ("Unknowns", review.unknowns)):
+            for x in items:
+                console.print(f"  {label}: {x}")
+        if review.what_would_improve_entry:
+            console.print(f"  Better entry: {review.what_would_improve_entry}")
+        if review.what_would_make_waiting_better:
+            console.print(f"  Waiting: {review.what_would_make_waiting_better}")
+        console.print("[dim]Considerations only - no order, no size.[/dim]")
+
+
+@mentor_app.command("replay")
+def mentor_replay(
+    ticker: str = typer.Argument(...),
+    decision_id: Optional[int] = typer.Option(None, "--decision"),
+    reveal: bool = typer.Option(False, "--reveal", help="Second pass: show the outcome."),
+) -> None:
+    """DECISION REPLAY: blind first pass (only information known at decision time)."""
+    settings = _boot()
+    from src.intelligence.briefing.replay import replay_view, reveal_outcome
+    from src.research.decisions import list_decisions
+    from src.research.investments import get_by_ticker
+
+    with session_scope(settings.db_url) as s:
+        inv = get_by_ticker(s, ticker)
+        decisions = list_decisions(s, inv) if inv else []
+        if not decisions:
+            console.print("[red]No decisions found.[/red]")
+            raise typer.Exit(code=1)
+        decision = next((d for d in decisions if d.id == decision_id), decisions[0])
+        if reveal:
+            console.print_json(json.dumps(reveal_outcome(s, decision, settings), default=str))
+        else:
+            console.print_json(json.dumps(replay_view(s, decision), default=str))
+            console.print("Answer the question, THEN run with --reveal. Rate with: "
+                          f"mentor rate-decision {decision.id} GOOD_PROCESS|MIXED|POOR_PROCESS")
+
+
+@mentor_app.command("rate-decision")
+def mentor_rate_decision(
+    decision_id: int = typer.Argument(...),
+    rating: str = typer.Argument(..., help="GOOD_PROCESS | MIXED | POOR_PROCESS"),
+    would_repeat: Optional[bool] = typer.Option(None, "--would-repeat/--would-not-repeat"),
+    note: Optional[str] = typer.Option(None),
+) -> None:
+    """Outcome-independent process rating for a decision."""
+    settings = _boot()
+    from src.db.research import Decision
+    from src.intelligence.briefing.replay import rate_decision
+
+    with session_scope(settings.db_url) as s:
+        d = s.get(Decision, decision_id)
+        if d is None:
+            console.print("[red]Decision not found.[/red]")
+            raise typer.Exit(code=1)
+        rate_decision(s, d, rating.upper(), would_repeat=would_repeat, replay_used=True, notes=note)
+    console.print("Rating stored (process, not outcome).")
+
+
+@mentor_app.command("opportunity")
+def mentor_opportunity() -> None:
+    """Opportunity-cost table: owned positions vs research candidates (no composite score)."""
+    settings = _boot()
+    from src.intelligence.briefing.mentor_workflows import opportunity_table
+
+    with session_scope(settings.db_url) as s:
+        rows = opportunity_table(s, settings)
+    t = Table(title="Opportunity set (dimensions visible; no opaque score)")
+    for col in ("Ticker", "Status", "Weight %", "Exp. return %", "Confidence", "Health", "Open risks", "Horizon"):
+        t.add_column(col)
+    for r in rows:
+        t.add_row(r["ticker"], r["status"], str(r["weight_pct"]),
+                  str(r["expected_return_pct"] if r["expected_return_pct"] is not None else "-"),
+                  str(r["thesis_confidence"] or "-"), r["thesis_health"],
+                  str(r["open_risks"] if r["open_risks"] is not None else "-"), r["time_horizon"] or "-")
+    console.print(t)
+
+
+@mentor_app.command("prefs")
+def mentor_prefs() -> None:
+    """Inspect deterministic feedback-derived preferences (ordering hints only)."""
+    settings = _boot()
+    from src.intelligence.briefing.mentor_workflows import feedback_preferences
+
+    with session_scope(settings.db_url) as s:
+        prefs = feedback_preferences(s)
+    if not prefs:
+        console.print("No feedback stored yet.")
+        return
+    for dt, p in prefs.items():
+        console.print(f"{dt}: {p['hint']} {p['counts']}")
+    console.print("[dim]Used only as ordering hints in the brief; never silent filtering.[/dim]")
+
+
+@stress_app.command("run")
+def stress_run(
+    file: Optional[Path] = typer.Option(None, "--file", help="YAML with scenarios (name + shocks)."),
+    builtin: bool = typer.Option(False, "--builtin", help="Run the built-in scenario set."),
+) -> None:
+    """Mechanical portfolio stress tests. Clearly not forecasts."""
+    settings = _boot()
+    from src.analytics.stress import BUILTIN_SCENARIOS, format_result, load_scenarios_yaml, run_stress
+
+    scenarios = BUILTIN_SCENARIOS if builtin or file is None else load_scenarios_yaml(file)
+    with session_scope(settings.db_url) as s:
+        for sc in scenarios:
+            try:
+                console.print(format_result(run_stress(s, settings, sc["name"], sc["shocks"])))
+            except Exception as exc:
+                console.print(f"[yellow]{sc['name']}: {exc}[/yellow]")
+            console.print("")
+
+
+@research_app.command("questions")
+def research_questions() -> None:
+    """Open AI research questions, ranked."""
+    settings = _boot()
+    from src.intelligence.briefing.mentor_workflows import open_research_questions
+
+    with session_scope(settings.db_url) as s:
+        rows = open_research_questions(s)
+    if not rows:
+        console.print("No open research questions.")
+    for r in rows:
+        console.print(f"#{r['id']} ({r['confidence'] or '-'}): {r['question']}")
+        if r["why"]:
+            console.print(f"    {r['why'][:120]}")
+
+
+@research_app.command("search")
+def research_search(keywords: str = typer.Argument(..., help="Comma-separated keywords.")) -> None:
+    """Search locally archived primary sources (no web browsing)."""
+    settings = _boot()
+    from src.intelligence.briefing.mentor_workflows import search_local_sources
+
+    with session_scope(settings.db_url) as s:
+        hits = search_local_sources(s, [k.strip() for k in keywords.split(",") if k.strip()])
+    if not hits:
+        console.print("No matches in the local archive.")
+    for h in hits:
+        console.print(f"[bold]{h['title']}[/bold] (source_documents:{h['source_document_id']})")
+        console.print(f"  ...{h['excerpt']}...")
+
+
 @app.command("technical")
 def technical_cmd(ticker: str = typer.Argument(...)) -> None:
     """Deterministic technical/market CONTEXT for an instrument (never a signal)."""

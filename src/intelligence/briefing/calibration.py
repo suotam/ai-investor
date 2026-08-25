@@ -57,3 +57,27 @@ def calibration_report(session: Session) -> CalibrationReport:
         hit_rate=round(hits / n, 3), buckets=buckets,
         note="Brier score: 0 = perfect, 0.25 = uninformed coin flip.",
     )
+
+def calibration_by_group(session: Session, group: str = "category") -> dict:
+    """Per-group calibration (category | investment). Groups below MIN_SAMPLE report
+    'insufficient' instead of meaningless precision."""
+    from src.db.research import Investment
+
+    investments = {i.id: i.ticker for i in session.scalars(select(Investment))}
+    resolved = [
+        p for p in session.scalars(select(Prediction))
+        if p.status in ("RESOLVED_TRUE", "RESOLVED_FALSE")
+    ]
+    groups: dict[str, list] = {}
+    for p in resolved:
+        key = (p.category or "uncategorized") if group == "category" else investments.get(p.investment_id, "unlinked")
+        groups.setdefault(key, []).append(p)
+    out = {}
+    for key, rows in groups.items():
+        if len(rows) < MIN_SAMPLE:
+            out[key] = {"n": len(rows), "sufficient": False, "note": f"insufficient (need {MIN_SAMPLE})"}
+            continue
+        brier = sum(((p.probability / 100) - (1.0 if p.status == "RESOLVED_TRUE" else 0.0)) ** 2 for p in rows) / len(rows)
+        out[key] = {"n": len(rows), "sufficient": True, "brier": round(brier, 4),
+                    "hit_rate": round(sum(1 for p in rows if p.status == "RESOLVED_TRUE") / len(rows), 2)}
+    return out

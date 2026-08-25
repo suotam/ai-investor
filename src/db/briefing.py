@@ -31,7 +31,11 @@ BRIEF_TYPES = ("daily", "weekly")
 BRIEF_STATUSES = ("completed", "preview", "failed", "superseded")
 ATTENTION_STATUSES = ("NEW", "SEEN", "DEFERRED", "RESOLVED")
 FEEDBACK_RATINGS = ("USEFUL", "NOT_USEFUL", "TOO_NOISY", "MORE_LIKE_THIS")
-CLAIM_STATUSES = ("OPEN", "FULFILLED", "BROKEN", "UNCLEAR", "WITHDRAWN")
+# v5 vocabulary (v4 legacy statuses remain accepted for stored rows)
+CLAIM_STATUSES = (
+    "OPEN", "CONFIRMED", "PARTIALLY_CONFIRMED", "MISSED", "SUPERSEDED", "AMBIGUOUS",
+    "FULFILLED", "BROKEN", "UNCLEAR", "WITHDRAWN",
+)
 
 
 class BriefRun(Base):
@@ -120,6 +124,9 @@ class ManagementClaim(Base):
     investment_id: Mapped[int] = mapped_column(ForeignKey("investments.id"), nullable=False)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
     speaker: Mapped[str | None] = mapped_column(String(200))
+    speaker_role: Mapped[str | None] = mapped_column(String(100))
+    claim_type: Mapped[str] = mapped_column(String(20), nullable=False, default="OTHER")
+    stated_confidence: Mapped[str | None] = mapped_column(String(100))  # only if explicitly stated
     claim_date: Mapped[date | None] = mapped_column(Date)
     topic: Mapped[str | None] = mapped_column(String(100))
     time_horizon: Mapped[str | None] = mapped_column(String(100))

@@ -167,3 +167,33 @@ def dismiss_candidate(session: Session, candidate: ResearchCandidate, note: str 
     candidate.status = "DISMISSED"
     candidate.notes = note
     session.flush()
+
+CATEGORY_BY_SOURCE = {"13f": "INSTITUTIONAL", "insider": "INSIDER", "manual": "SPECIAL_SITUATION",
+                      "screen": "QUALITY/GROWTH/VALUATION"}
+
+
+def candidate_detail(session: Session, candidate: ResearchCandidate) -> dict:
+    """WHY FOUND / DATA QUALITY / KEY NUMBERS / KNOWN / UNKNOWN / NEXT STEP - no opaque score."""
+    reasons = json.loads(candidate.reasons_json or "[]")
+    from src.db.intelligence import FinancialFact
+    from src.intelligence.entities import resolve_instrument_loose, _provider_ids
+
+    inst = resolve_instrument_loose(session, ticker=candidate.ticker)
+    cik = _provider_ids(inst).get("sec_cik") if inst else None
+    key_numbers = []
+    if cik:
+        from src.intelligence.connectors.xbrl import latest_metrics
+
+        for f in latest_metrics(session, cik)[:6]:
+            key_numbers.append(f"{f.metric}: {f.value:,.0f} {f.unit} [{f.period_end}]")
+    return {
+        "ticker": candidate.ticker,
+        "category": CATEGORY_BY_SOURCE.get(candidate.source, candidate.source.upper()),
+        "why_found": reasons,
+        "data_quality": "primary (SEC-derived)" if key_numbers else "identifier only - no structured data yet",
+        "key_numbers": key_numbers or ["none stored"],
+        "what_we_know": reasons + key_numbers,
+        "what_we_dont_know": ["thesis", "valuation", "management quality", "unit economics"],
+        "next_research_step": ("PROMOTE TO RESEARCH and draft a thesis skeleton"
+                               if key_numbers else "run `company onboard " + candidate.ticker + "` first"),
+    }

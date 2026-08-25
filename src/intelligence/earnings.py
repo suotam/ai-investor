@@ -157,7 +157,11 @@ class KpiComparison:
 def compare_kpis(session: Session, investment: Investment) -> list[KpiComparison]:
     out: list[KpiComparison] = []
     for kpi in kpi_service.list_kpis(session, investment):
-        obs = [o for o in kpi_service.observations(session, kpi) if o.period_date is not None]
+        # consensus-sourced observations are expectations, not actuals - compared separately
+        obs = [
+            o for o in kpi_service.observations(session, kpi)
+            if o.period_date is not None and (o.source or "").lower() != "consensus"
+        ]
         obs.sort(key=lambda o: o.period_date)
         if not obs:
             continue
@@ -263,3 +267,60 @@ def comparison_table_text(comparisons: list[KpiComparison]) -> str:
             parts.append(f"FLAG: {c.flag}")
         lines.append(" | ".join(parts))
     return "\n".join(lines)
+
+def period_label_from_date(d: date) -> str:
+    q = (d.month - 1) // 3 + 1
+    return f"{d.year}Q{q}"
+
+
+def auto_extract_new_filings(session: Session, settings) -> dict:
+    """Pipeline stage: run issuer extractors over archived filing documents that have a raw
+    payload and were not extracted yet (tracked via source_documents.metadata_json flag).
+    Fully deterministic and idempotent."""
+    from src.db.research import Investment
+    from src.intelligence.entities import _provider_ids
+    from src.intelligence.issuer_extractors import get_extractor
+
+    stored_total = 0
+    processed = 0
+    from src.db.models import Instrument
+
+    for inv in session.scalars(select(Investment).where(Investment.status.in_(("OWNED", "RESEARCHING")))):
+        if get_extractor(inv.ticker) is None or inv.instrument_id is None:
+            continue
+        inst = session.get(Instrument, inv.instrument_id)
+        cik = _provider_ids(inst).get("sec_cik") if inst else None
+        if not cik:
+            continue
+        docs = session.scalars(
+            select(SourceDocument).where(
+                SourceDocument.provider == "sec_edgar",
+                SourceDocument.source_type == "filing",
+                SourceDocument.entity_key == cik,
+                SourceDocument.raw_path.isnot(None),
+            )
+        ).all()
+        for doc in docs:
+            meta = json.loads(doc.metadata_json) if doc.metadata_json else {}
+            if meta.get("kpi_extracted"):
+                continue
+            if doc.period_end is None:
+                continue
+            from pathlib import Path
+
+            raw_path = Path(doc.raw_path)
+            if not raw_path.exists():
+                continue
+            raw = raw_path.read_text(encoding="utf-8", errors="replace")
+            res = run_extraction(
+                session, inv, raw, period=period_label_from_date(doc.period_end),
+                period_date=doc.period_end, source_document=doc,
+                reported_at=doc.published_at.date() if doc.published_at else None,
+            )
+            stored_total += len(res.stored)
+            processed += 1
+            meta["kpi_extracted"] = True
+            meta["kpi_extract_result"] = {"stored": len(res.stored), "ambiguous": len(res.ambiguous)}
+            doc.metadata_json = json.dumps(meta)
+    session.flush()
+    return {"stored": stored_total, "message": f"{processed} document(s) processed" if processed else "nothing new"}

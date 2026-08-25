@@ -66,6 +66,13 @@ def generate_brief(
     if brief_type == "weekly":
         _add_weekly_extras(session, settings, doc, period_start, now)
 
+    if getattr(settings, "mentor_teach_me", False) and mode != "preview":
+        from src.intelligence.briefing.mentor_workflows import pick_concept
+
+        concept = pick_concept(session, [d.delta_type for d in surfaced])
+        if concept:
+            doc.weekly_extras["Investment concept of the day"] = [f"{concept[0]}: {concept[1]}"]
+
     ai_used = False
     ai_model = ai_context_hash = None
     if use_ai:

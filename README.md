@@ -10,6 +10,12 @@ A **local-first, read-only, deterministic** personal investment platform.
   pipeline), immutable thesis versions, explicit assumptions, risks, catalysts, thesis
   breakers, evidence, KPIs, valuation scenarios, an immutable decision journal, predictions
   and a deterministic review/health system. Fully usable **without any AI**.
+* **v5 — automation & deeper mentor**: one-command daily/weekly pipelines with per-stage
+  status and job tracking, Windows Task Scheduler scripts, local AI-server helper,
+  management-claim extraction and track record, transcript import, earnings
+  preview/post-mortem, company onboarding + extractor assistant, decision replay
+  (outcome-bias defense), stress tests, opportunity-cost table, add/exit reviews,
+  optional local TTS, rotating backups, doctor checks and a System Health page.
 * **v4 — mentor & briefing layer**: delta-aware daily/weekly briefs ("what changed", never
   a database dump), persistent brief checkpoints with alert hygiene, issuer-specific KPI
   extraction from primary earnings documents (NU extractor), deterministic earnings
@@ -389,6 +395,107 @@ All manual entry (investments, theses, revisions, assumptions, KPIs, evidence, r
 catalysts, breakers, valuations, decisions, predictions, red team, pre-mortem) happens in
 the dashboard Research page forms.
 
+## Automation & deeper mentor (v5)
+
+### One-command operation
+
+```powershell
+python -m src.main run daily [--no-ai] [--no-sync] [--no-audio]
+python -m src.main run weekly [--no-ai] [--no-sync]
+```
+
+Daily orchestrates: backup -> prices -> SEC (filings+XBRL for monitored investments) ->
+insiders -> macro -> 13F (tracked managers) -> issuer KPI extraction over NEW filing
+documents -> earnings comparison (review proposals) -> AI analysis of unprocessed HIGH
+events (health-checked, max 3 per run for the slow local model) -> daily brief -> optional
+TTS. Weekly adds: weekly review, portfolio risk decomposition, open-claims check. Every
+stage runs in its own transaction with try/except - a provider failure marks that stage
+FAIL and the run PARTIAL, the rest continues; the brief always completes. Runs and stages
+are persisted (`pipeline_runs`/`pipeline_stages`) and shown on the System page.
+
+### Windows automation
+`scripts/run_daily.ps1` and `run_weekly.ps1` (absolute paths, venv activation, per-day logs
+in logs/, meaningful exit codes, no secrets). Register explicitly:
+`.\scripts\register_tasks.ps1 [-DailyTime 07:00 -WeeklyDay SUN -WeeklyTime 08:00]`
+(uses schtasks; `-Unregister` removes). `scripts/start_ai_server.ps1` starts the local
+llama.cpp server (config: `ai.server_executable/server_model/server_context`), binds to
+127.0.0.1 only, health-checks before returning; the daily pipeline uses AI only when the
+health check passes and never fails without it.
+
+### Management intelligence
+`transcript import NU call.txt --source "Q2 2026 earnings call"` archives the text with
+provenance and deterministically extracts forward-looking statements (verbatim quotes:
+"We expect / target / plan / guide ..."), classified as GUIDANCE / TARGET / EXPECTATION /
+STRATEGIC_CLAIM / RISK_COMMENTARY / CAPITAL_ALLOCATION / OTHER with a parsed time horizon.
+`claims list NU`, `claims link <id> kpi_observation:<id> --status CONFIRMED` ties claims to
+later outcomes (statuses: OPEN / CONFIRMED / PARTIALLY_CONFIRMED / MISSED / SUPERSEDED /
+AMBIGUOUS - human-judged), and `claims track-record NU` shows transparent counts + raw
+examples; deliberately no single trust score. The mentor style distinguishes "management
+said" vs "data showed" vs "AI infers".
+
+### Earnings preview & post-mortem
+`earnings preview NU`: current thesis, top-5 KPIs with previous values, OUR expected ranges
+(only from stored assumptions - nothing fabricated), consensus only if explicitly stored as
+a `consensus`-sourced observation, breaker questions, open management claims, valuation and
+technical context. `earnings postmortem NU --period 2026Q2`: ACTUAL vs PREVIOUS vs OUR
+EXPECTATION vs CONSENSUS with deterministic surprise flags; consensus observations never
+pollute actuals.
+
+### Company onboarding & extractor assistant
+`company onboard TICKER`: resolves instrument + SEC identity, detects filer type
+(domestic 10-K/10-Q vs foreign 20-F/6-K), syncs filings + XBRL, reports available
+standard metrics, extractor presence and KPIs with no automatic source, and writes
+`output/onboarding/TICKER_extractor_todo.md` + a research-YAML skeleton. Never invents a
+thesis. `extractor inspect TICKER --file/--doc`: shows numeric candidate contexts per KPI
+name for building deterministic extractor rules (rules require review + tests before use).
+
+### Decision replay & quality
+`mentor replay NU [--decision id]` shows the BLIND view - only the frozen snapshot and the
+time-aware context packet as of decision time (no later evidence, no outcome) - and asks
+"would you make the same decision?". `--reveal` then shows price change and evidence since.
+`mentor rate-decision <id> GOOD_PROCESS|MIXED|POOR_PROCESS` stores an outcome-independent
+process rating. Calibration (`calibration`, System page) adds per-category/per-investment
+groups, each honoring the minimum-sample rule.
+
+### Portfolio risk, stress tests, opportunity cost
+Weekly risk decomposition: concentration, currency/sector/asset mixes (Unknown stays
+Unknown) and SHARED MACRO THESIS exposure (positions linked to the same macro series ~ one
+bet). `stress run --builtin` / `stress run scenarios.yaml`: mechanical shocks
+(`NU_price: -25`, `USD: +10`, `ALL_EQUITIES: -20`) applied to current prices/FX - clearly
+labeled "not a forecast"; no LLM-fabricated betas. `mentor opportunity` compares owned
+positions and candidates across visible dimensions (expected return from your scenarios,
+confidence, health, weight, open risks) - no composite score.
+
+### Add / exit reviews
+`mentor add-review NU` and `mentor exit-review NU`: deterministic facts (weight, valuation
+vs targets, technical context, contradicting evidence, alternatives) + AI considerations
+(arguments for/against, better entry, unknowns). Exit review focuses on: thesis broken?
+valuation extreme? opportunity cost? or price noise? Never an order, never a size.
+
+### TTS, personalization, teach-me
+Optional local TTS (`tts.enabled: true`, Windows System.Speech -> .wav next to the brief;
+disabled provider is the safe default and TTS failure never fails a brief). `mentor:` config
+sets target minutes and section toggles. `mentor prefs` shows deterministic
+feedback-derived hints (inspectable; ordering only, never silent filtering). The brief can
+include one "Investment concept of the day" relevant to recent deltas (history prevents
+repeats). `research questions` lists open AI research questions; `research search
+"npl,vintage"` greps the local source archive (no web browsing).
+
+### Operations
+`doctor` - migration head, portfolio invariant (positions == transaction replay), cash
+ledger, research orphans, provenance, raw archive paths, dedup, brief checkpoints, AI
+endpoint, backups, provider config -> OK/WARN/FAIL (read-only). `backup` + automatic
+rotating backups before each pipeline run (7 daily / 4 weekly kept in data/backups/; restore
+= stop everything and copy the backup over data/investor.db). System Health dashboard page:
+last runs, failed stages, provider freshness, calibration, doctor button.
+
+### v5 limitations
+* Live transcript providers don't exist yet - `TranscriptProvider` is manual import only
+  (copyright-safe by design).
+* Fundamental discovery screens depend on XBRL coverage of synced issuers.
+* TTS voice quality = Windows SAPI; swap the provider for a better local engine if desired.
+* AI stages analyze at most 3 HIGH events per daily run (local model speed).
+
 ## Mentor & briefing layer (v4)
 
 ### Delta, not state
@@ -669,7 +776,7 @@ no daemon required)
 python -m pytest
 ```
 
-144 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
+167 tests, no network, no IBKR account: Flex parsing, duplicate import (id + hash), raw
 archiving/audit, instrument resolution, cash ledger, average-cost/short/cross-zero/FIFO engine,
 valuation & weights, FX (direct/inverse/cross/staleness/unavailable), price cache incrementality,
 value history, TWR/simple/XIRR/drawdown on hand-checkable scenarios, snapshot idempotency, crypto
@@ -735,7 +842,7 @@ resolutions are all **manual**. There is no automatic earnings/SEC/news/insider/
 are v3+. Free-form breaker conditions are not machine-evaluated. Calibration shows simple
 counts only. Deleting research rows is not exposed in the UI (immutability first).
 
-## What v5 should do next
+## What v6 should do next
 
 Transcript ingestion feeding management_claims automatically; TTS integration for the audio
 brief; issuer extractors for further holdings; scheduled automation recipes (Task Scheduler);

@@ -31,6 +31,10 @@ class AIResponse:
     text: str
     provider: str
     model: str
+    finish_reason: str | None = None
+    reasoning_chars: int = 0  # length of reasoning_content, if the model emitted one
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class AIProvider(ABC):
@@ -42,8 +46,17 @@ class AIProvider(ABC):
         raise NotImplementedError
 
     def complete_json(self, system: str, user: str, max_tokens: int = 4096) -> dict:
-        """Ask for JSON, parse defensively. Raises AIInvalidOutput on garbage."""
+        """Ask for JSON, parse defensively. Raises AIInvalidOutput on garbage. The final
+        answer is read ONLY from message.content; reasoning_content never substitutes it."""
         resp = self.complete(system + "\nRespond with a single valid JSON object and nothing else.", user, max_tokens)
+        if not resp.text.strip():
+            raise AIInvalidOutput(
+                "model produced no final content "
+                f"(finish_reason={resp.finish_reason}, reasoning_chars={resp.reasoning_chars}, "
+                f"completion_tokens={resp.completion_tokens}/{max_tokens})"
+                + (" - completion budget likely exhausted by reasoning before the final JSON"
+                   if resp.finish_reason == "length" and resp.reasoning_chars else "")
+            )
         return extract_json(resp.text)
 
 
@@ -99,12 +112,39 @@ class OpenAICompatProvider(AIProvider):
             "temperature": self.temperature,
             "max_tokens": max_tokens,
         }
+        log.debug(
+            "AI request: endpoint=%s model=%s messages=%d prompt_chars=%d (~%d tokens) "
+            "max_tokens=%d temperature=%s timeout=%.0fs",
+            f"{self.base_url}/chat/completions", self.model, len(payload["messages"]),
+            len(system) + len(user), (len(system) + len(user)) // 4, max_tokens,
+            self.temperature, self.timeout,
+        )
         data = self._post(f"{self.base_url}/chat/completions", payload, self.timeout)
         try:
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            message = choice["message"]
+            text = message.get("content")
         except (KeyError, IndexError, TypeError) as exc:
-            raise AIInvalidOutput(f"unexpected completion payload: {data}") from exc
-        return AIResponse(text=text, provider=self.name, model=data.get("model") or self.model)
+            raise AIInvalidOutput(f"unexpected completion payload keys: {sorted(data) if isinstance(data, dict) else type(data)}") from exc
+        usage = data.get("usage") or {}
+        resp = AIResponse(
+            text=text or "",
+            provider=self.name,
+            model=data.get("model") or self.model,
+            finish_reason=choice.get("finish_reason"),
+            # reasoning models (e.g. Muse Glimmer via llama.cpp) return reasoning separately;
+            # it is NEVER parsed as the structured result - recorded for diagnostics only
+            reasoning_chars=len(message.get("reasoning_content") or ""),
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+        )
+        log.debug(
+            "AI response: finish_reason=%s content_chars=%d reasoning_chars=%d "
+            "prompt_tokens=%s completion_tokens=%s keys=%s",
+            resp.finish_reason, len(resp.text), resp.reasoning_chars,
+            resp.prompt_tokens, resp.completion_tokens, sorted(message.keys()),
+        )
+        return resp
 
     def health(self) -> dict:
         try:

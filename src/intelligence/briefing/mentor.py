@@ -89,6 +89,12 @@ def synthesize(
     context = _compact_context(session, doc)
     payload = json.dumps(context, indent=1, default=str)
     context_hash = sha256_bytes(payload.encode("utf-8"))
+    log.info(
+        "mentor context budget: %d chars (~%d tokens), %d delta(s), %d investment(s), "
+        "%d suppressed item(s) NOT sent",
+        len(payload), len(payload) // 4, len(context["deltas"]), len(context["theses"]),
+        context["suppressed_low_signal_items"],
+    )
     system = (
         MENTOR_STYLE
         + "\nProduce a single JSON object with keys: today_in_one_minute (required, ~4 sentences), "
@@ -96,7 +102,7 @@ def synthesize(
         "(each a short spoken-style paragraph or null when there is nothing to say)."
     )
     try:
-        raw = provider.complete_json(system, f"TODAY'S DELTAS AND CONTEXT:\n{payload}", max_tokens=900)
+        raw = provider.complete_json(system, f"TODAY'S DELTAS AND CONTEXT:\n{payload}")
         synthesis = MentorSynthesis.model_validate(raw)
         return synthesis.model_dump(), context_hash, None
     except (AIInvalidOutput, ValidationError) as exc:

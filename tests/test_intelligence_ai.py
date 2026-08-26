@@ -404,3 +404,81 @@ def test_event_analysis_malformed_flag_rejected_no_db_writes(session) -> None:
             analyze_event(session, fake_provider(reply), event, inv)
     assert session.scalar(select(func.count(AiProposal.id))) == 0
     assert event.ai_state == "NONE"  # failed analysis never marks the event analyzed
+
+
+# ------------------------------------------------- reasoning-model response handling (v5 fix)
+
+
+def reasoning_provider(content, reasoning="thinking...", finish_reason="stop",
+                       prompt_tokens=340, completion_tokens=1313) -> OpenAICompatProvider:
+    def post_fn(url, payload, timeout):
+        return {
+            "choices": [{
+                "finish_reason": finish_reason,
+                "message": {"role": "assistant", "content": content, "reasoning_content": reasoning},
+            }],
+            "model": "glimmer-test",
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+        }
+
+    return OpenAICompatProvider(ai_settings(), post_fn=post_fn)
+
+
+def test_reasoning_response_content_parsed_not_reasoning() -> None:
+    """A: reasoning_content non-empty + valid JSON content -> succeeds from CONTENT only."""
+    p = reasoning_provider('{"a": 1}', reasoning='{"a": 999} <- must never be used')
+    resp = p.complete("s", "u")
+    assert resp.text == '{"a": 1}' and resp.reasoning_chars > 0
+    assert resp.finish_reason == "stop" and resp.completion_tokens == 1313
+    assert p.complete_json("s", "u") == {"a": 1}  # reasoning JSON never substituted
+
+
+def test_reasoning_exhaustion_clean_diagnostic() -> None:
+    """B: budget consumed by reasoning -> empty content, finish_reason=length -> clear error."""
+    p = reasoning_provider("", reasoning="x" * 3476, finish_reason="length", completion_tokens=900)
+    with pytest.raises(AIInvalidOutput) as exc:
+        p.complete_json("s", "u", max_tokens=900)
+    msg = str(exc.value)
+    assert "no final content" in msg
+    assert "finish_reason=length" in msg and "reasoning_chars=3476" in msg
+    assert "exhausted by reasoning" in msg  # actionable diagnosis
+    assert "900/900" in msg
+
+
+def test_empty_content_finish_stop_clean_failure() -> None:
+    """C: empty content even with finish_reason=stop -> clean AIInvalidOutput (no crash)."""
+    p = reasoning_provider("", reasoning="some thoughts", finish_reason="stop")
+    with pytest.raises(AIInvalidOutput, match="no final content"):
+        p.complete_json("s", "u")
+
+
+def test_invalid_final_json_falls_back_without_db_writes(session, settings) -> None:
+    """D: garbage content -> mentor falls back deterministically, nothing persisted."""
+    from src.intelligence.briefing.generate import generate_brief
+    from src.research.items import add_risk
+
+    inv = create_investment(session, "NU", status="OWNED")
+    create_thesis(session, inv, "T")
+    r = add_risk(session, inv, "R", severity="HIGH", category="macro")
+    r.created_at = r.updated_at = datetime(2026, 8, 21, 5, 0)
+    session.commit()
+    bad = reasoning_provider("here are my thoughts in prose, no json", reasoning="...")
+    doc, run, md_path, _ = generate_brief(
+        session, settings, "daily", use_ai=True, now=datetime(2026, 8, 21, 6, 0), ai_provider=bad
+    )
+    session.commit()
+    assert doc.ai_synthesis is None
+    assert "unavailable" in doc.ai_note.lower()
+    assert run is not None and run.ai_used is False  # brief completed deterministically
+    assert session.scalar(select(func.count(AiProposal.id))) == 0
+
+
+def test_event_analysis_handles_reasoning_payload(session) -> None:
+    """G: the event-analysis path parses content correctly with reasoning_content present."""
+    inv = create_investment(session, "NU")
+    create_thesis(session, inv, "T")
+    event, _ = record_event(session, "EARNINGS_RELEASE", "rg1", "Q2", datetime(2026, 8, 14),
+                            investment_id=inv.id)
+    p = reasoning_provider(VALID_ANALYSIS, reasoning="long hidden reasoning " * 50)
+    analysis, proposals = analyze_event(session, p, event, inv)
+    assert analysis.genuinely_new is True and len(proposals) == 1

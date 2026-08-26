@@ -80,11 +80,17 @@ briefing:
   weekly:
     max_items: 25
 
-# ---- v5 operations & mentor ----
-# ai server helper (scripts/start_ai_server.ps1); bound to 127.0.0.1 only
-#   server_executable: C:\llama-cuda\bin\llama-server.exe
-#   server_model: <path or HF identifier of the GGUF model>
-#   server_context: 16384
+ai:
+  enabled: true
+  provider: llama_cpp
+  base_url: "http://127.0.0.1:8080/v1"
+  model: "local"
+  timeout_seconds: 1500
+  temperature: 0.2
+
+  server_executable: "C:\\llama-cuda\\bin\\llama-server.exe"
+  server_model: "meta-models/Muse-Glimmer-30B-GGUF:Q4_K_M"
+  server_context: 8192
 
 tts:
   enabled: false          # optional local Windows TTS (System.Speech) -> .wav next to the brief

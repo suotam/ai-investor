@@ -51,7 +51,18 @@ def test_no_change_day_produces_no_change_brief(session, settings, quiet_nu) -> 
     assert run is not None and run.status == "completed" and run.items_count == 0
 
 
+def _material_delta(session, quiet_nu):
+    """Give the day one material delta so the mentor stage is actually reached."""
+    from src.research.items import add_risk
+
+    r = add_risk(session, quiet_nu, "Fresh risk", severity="HIGH", category="macro")
+    r.created_at = r.updated_at = T1 - timedelta(hours=1)
+    session.commit()
+    return r
+
+
 def test_ai_unavailable_fallback_never_fails_brief(session, settings, quiet_nu) -> None:
+    _material_delta(session, quiet_nu)
     settings.ai_enabled = False  # provider raises AIUnavailable
     doc, run, md_path, _ = generate_brief(session, settings, "daily", use_ai=True, now=T1)
     session.commit()
@@ -61,9 +72,32 @@ def test_ai_unavailable_fallback_never_fails_brief(session, settings, quiet_nu) 
     assert "AI mentor synthesis unavailable" in md_path.read_text(encoding="utf-8")
 
 
+def test_no_change_day_skips_ai_entirely(session, settings, quiet_nu) -> None:
+    """Spec test E: no material deltas -> the mentor is NOT called at all (NOT_NEEDED)."""
+    calls = []
+
+    class CountingProvider:
+        name, model = "counting", "m"
+
+        def complete_json(self, *a, **k):
+            calls.append(1)
+            return {}
+
+    doc, run, md_path, _ = generate_brief(
+        session, settings, "daily", use_ai=True, now=T1, ai_provider=CountingProvider()
+    )
+    session.commit()
+    assert doc.no_change and calls == []  # AI never invoked
+    assert "not needed (no material deltas)" in doc.ai_note
+    assert run is not None and run.ai_used is False
+    assert NO_CHANGE_SENTENCE in md_path.read_text(encoding="utf-8")
+
+
 def test_mentor_synthesis_included_when_ai_works(session, settings, quiet_nu) -> None:
+    """Spec test F: with a material delta the mentor IS called."""
     from tests.test_intelligence_ai import fake_provider
 
+    _material_delta(session, quiet_nu)
     reply = json.dumps({
         "today_in_one_minute": "Nothing material happened. NU thesis is unchanged. No action required.",
         "portfolio": None, "thesis_changes": None, "macro": None,

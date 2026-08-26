@@ -75,6 +75,11 @@ def generate_brief(
 
     ai_used = False
     ai_model = ai_context_hash = None
+    if use_ai and doc.no_change:
+        # Signal > compute: a no-change day needs no local inference. The deterministic
+        # concise no-change brief IS the desired output; AI is recorded as not needed.
+        use_ai = False
+        doc.ai_note = "AI mentor synthesis not needed (no material deltas)."
     if use_ai:
         provider = ai_provider
         if provider is None:
@@ -93,7 +98,7 @@ def generate_brief(
                 ai_model = provider.model
             else:
                 doc.ai_note = note
-    else:
+    elif doc.ai_note is None:
         doc.ai_note = "AI mentor synthesis skipped (--no-ai); deterministic brief."
 
     md = render_markdown(doc)

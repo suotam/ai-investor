@@ -681,6 +681,52 @@ def ai_earnings(
         console.print(f"[green]{len(proposals)} proposal(s) PENDING review - nothing applied.[/green]")
 
 
+@ai_app.command("debug-mentor")
+def ai_debug_mentor() -> None:
+    """Safe mentor-synthesis diagnostics: sizes/tokens/finish_reason only - never the
+    private prompt content. Makes one real call against the local server."""
+    settings = _boot()
+    from src.core import utcnow
+    from src.intelligence.ai.provider import AIUnavailable, get_ai_provider
+    from src.intelligence.briefing.checkpoints import previous_portfolio_state, resolve_window
+    from src.intelligence.briefing.deltas import compute_deltas
+    from src.intelligence.briefing.hygiene import apply_hygiene
+    from src.intelligence.briefing.assemble import build_document
+    from src.intelligence.briefing.mentor import _compact_context
+
+    with session_scope(settings.db_url) as s:
+        now = utcnow()
+        start, end, _sup, mode = resolve_window(s, "daily", now=now)
+        deltas, _state = compute_deltas(s, settings, start, end, previous_portfolio_state(s, "daily"))
+        surfaced, suppressed = apply_hygiene(s, deltas, now=now, brief_type="daily")
+        doc = build_document(s, settings, "daily", surfaced, suppressed, mode, now)
+        context = _compact_context(s, doc)
+        payload = json.dumps(context, indent=1, default=str)
+        console.print("[bold]Mentor context budget[/bold]")
+        console.print(f"  chars: {len(payload)} (~{len(payload) // 4} tokens)")
+        console.print(f"  deltas sent: {len(context['deltas'])} | investments: {len(context['theses'])}"
+                      f" | suppressed (NOT sent): {context['suppressed_low_signal_items']}")
+        if doc.no_change:
+            console.print("  [green]no material deltas -> daily brief would record AI as NOT NEEDED[/green]")
+        try:
+            provider = get_ai_provider(settings)
+        except AIUnavailable as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            return
+        console.print("[bold]AI request[/bold]")
+        console.print(f"  endpoint: {settings.ai_base_url}/chat/completions | model: {settings.ai_model}")
+        console.print(f"  max completion tokens: 4096 | temperature: {settings.ai_temperature}"
+                      f" | timeout: {settings.ai_timeout_seconds:.0f}s")
+        resp = provider.complete(
+            "Respond with a single valid JSON object and nothing else.",
+            'Return exactly: {"status": "ok"}', max_tokens=4096,
+        )
+        console.print("[bold]AI response (probe call)[/bold]")
+        console.print(f"  finish_reason: {resp.finish_reason}")
+        console.print(f"  content chars: {len(resp.text)} | reasoning chars: {resp.reasoning_chars}")
+        console.print(f"  prompt tokens: {resp.prompt_tokens} | completion tokens: {resp.completion_tokens}")
+
+
 @proposals_app.command("list")
 def proposals_list(status: str = typer.Option("PENDING", help="PENDING|ACCEPTED|REJECTED|...")) -> None:
     settings = _boot()

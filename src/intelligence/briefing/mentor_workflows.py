@@ -133,7 +133,7 @@ def _review(session, settings, provider: AIProvider, inv: Investment, mode: str)
         "JSON keys: arguments_for, arguments_against, what_would_improve_entry, "
         "what_would_make_waiting_better, unknowns, summary."
     )
-    raw = provider.complete_json(system, json.dumps(facts, indent=1, default=str), max_tokens=900)
+    raw = provider.complete_json(system, json.dumps(facts, indent=1, default=str))
     try:
         review = PositionReview.model_validate(raw)
     except ValidationError as exc:

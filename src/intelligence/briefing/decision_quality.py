@@ -103,7 +103,7 @@ def run_decision_review(session, provider: AIProvider, investment: Investment) -
         "current_thesis_one_line": (v.core_thesis or "")[:300] if v else None,
         "decisions": payload,
     }, indent=1)
-    raw = provider.complete_json(system, user, max_tokens=1200)
+    raw = provider.complete_json(system, user)
     try:
         return DecisionQualityReview.model_validate(raw)
     except ValidationError as exc:

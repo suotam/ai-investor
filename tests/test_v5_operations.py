@@ -70,6 +70,111 @@ def test_daily_pipeline_partial_failure(session, settings, db_url, monkeypatch) 
     assert report.status == "PARTIAL"
 
 
+def test_daily_pipeline_broker_sync_skips(session, settings, db_url, monkeypatch) -> None:
+    """Broker sync is SKIPped offline, and SKIPped online when credentials are missing."""
+    from src.operations import pipeline as pl
+
+    create_investment(session, "NU", status="OWNED")
+    session.commit()
+    report = pl.run_daily(settings, use_ai=False, audio=False, sync_external=False)
+    stages = {s.stage: s for s in report.stages}
+    assert stages["Broker sync"].status == "SKIP"
+    assert "--no-sync" in stages["Broker sync"].message
+
+    # online but no credentials: broker stage skips with a clear message, others untouched
+    monkeypatch.setattr("src.config.get_secret", lambda name: None)
+    # other online stages must not hit the network in this test; stub their entry points
+    for target in (
+        "src.market_data.service.update_prices",
+        "src.intelligence.connectors.sec.sync_filings",
+        "src.intelligence.connectors.insiders.sync_insiders",
+        "src.intelligence.connectors.macro.sync_macro",
+    ):
+        monkeypatch.setattr(target, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    report = pl.run_daily(settings, use_ai=False, audio=False, sync_external=True)
+    stages = {s.stage: s for s in report.stages}
+    assert stages["Broker sync"].status == "SKIP"
+    assert "credentials" in stages["Broker sync"].message.lower()
+
+
+def test_daily_pipeline_broker_sync_imports_and_rebuilds(session, settings, db_url, monkeypatch) -> None:
+    """New broker activity -> transactions imported and positions rebuilt in the same stage;
+    no new activity -> rebuild is skipped. IBKR itself is mocked (offline test)."""
+    from src.operations import pipeline as pl
+
+    create_investment(session, "NU", status="OWNED")
+    session.commit()
+
+    monkeypatch.setattr("src.config.get_secret", lambda name: "test-secret")
+    from src.portfolio.importer import ImportResult
+
+    calls = {"sync": 0, "rebuild": 0}
+
+    def fake_sync(s, st, xml_file=None):
+        calls["sync"] += 1
+        return ImportResult(account_id=1, transactions_inserted=2, cash_flows_inserted=1)
+
+    def fake_rebuild(s):
+        calls["rebuild"] += 1
+        return {}
+
+    monkeypatch.setattr("src.connectors.ibkr.sync.sync_ibkr", fake_sync)
+    monkeypatch.setattr("src.portfolio.positions.rebuild_positions", fake_rebuild)
+    for target in (
+        "src.market_data.service.update_prices",
+        "src.intelligence.connectors.sec.sync_filings",
+        "src.intelligence.connectors.insiders.sync_insiders",
+        "src.intelligence.connectors.macro.sync_macro",
+    ):
+        monkeypatch.setattr(target, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    report = pl.run_daily(settings, use_ai=False, audio=False, sync_external=True)
+    stages = {s.stage: s for s in report.stages}
+    assert stages["Broker sync"].status == "OK"
+    assert stages["Broker sync"].items == 3
+    assert "positions rebuilt" in stages["Broker sync"].message
+    assert calls == {"sync": 1, "rebuild": 1}
+    assert stages["Brief"].status == "OK"  # rest of the pipeline unaffected
+
+    # quiet day: sync returns nothing new -> no rebuild
+    def fake_sync_quiet(s, st, xml_file=None):
+        return ImportResult(account_id=1)
+
+    monkeypatch.setattr("src.connectors.ibkr.sync.sync_ibkr", fake_sync_quiet)
+    report = pl.run_daily(settings, use_ai=False, audio=False, sync_external=True)
+    stages = {s.stage: s for s in report.stages}
+    assert stages["Broker sync"].status == "OK"
+    assert stages["Broker sync"].items == 0
+    assert "no new broker activity" in stages["Broker sync"].message
+    assert calls["rebuild"] == 1  # unchanged
+
+
+def test_daily_pipeline_broker_failure_does_not_block_brief(session, settings, db_url, monkeypatch) -> None:
+    from src.operations import pipeline as pl
+
+    create_investment(session, "NU", status="OWNED")
+    session.commit()
+    monkeypatch.setattr("src.config.get_secret", lambda name: "test-secret")
+
+    def boom(*a, **k):
+        raise RuntimeError("IBKR gateway timeout")
+
+    monkeypatch.setattr("src.connectors.ibkr.sync.sync_ibkr", boom)
+    for target in (
+        "src.market_data.service.update_prices",
+        "src.intelligence.connectors.sec.sync_filings",
+        "src.intelligence.connectors.insiders.sync_insiders",
+        "src.intelligence.connectors.macro.sync_macro",
+    ):
+        monkeypatch.setattr(target, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    report = pl.run_daily(settings, use_ai=False, audio=False, sync_external=True)
+    stages = {s.stage: s for s in report.stages}
+    assert stages["Broker sync"].status == "FAIL"
+    assert "IBKR gateway timeout" in stages["Broker sync"].message
+    assert stages["Brief"].status == "OK"
+    assert report.status == "PARTIAL"
+
+
 def test_weekly_pipeline(session, settings, db_url) -> None:
     from src.operations.pipeline import run_weekly
 

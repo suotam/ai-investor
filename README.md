@@ -404,7 +404,9 @@ python -m src.main run daily [--no-ai] [--no-sync] [--no-audio]
 python -m src.main run weekly [--no-ai] [--no-sync]
 ```
 
-Daily orchestrates: backup -> prices -> SEC (filings+XBRL for monitored investments) ->
+Daily orchestrates: backup -> broker sync (IBKR Flex, READ ONLY; skipped without
+credentials, positions rebuilt only when new activity arrived) -> prices -> SEC
+(filings+XBRL for monitored investments) ->
 insiders -> macro -> 13F (tracked managers) -> issuer KPI extraction over NEW filing
 documents -> earnings comparison (review proposals) -> AI analysis of unprocessed HIGH
 events (health-checked, max 3 per run for the slow local model) -> daily brief -> optional

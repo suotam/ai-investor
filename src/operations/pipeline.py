@@ -129,6 +129,33 @@ def run_daily(
 
     net_skip = None if sync_external else "external sync disabled (--no-sync)"
 
+    def _broker(s):
+        from src.connectors.ibkr.sync import sync_ibkr
+        from src.portfolio.positions import rebuild_positions
+
+        result = sync_ibkr(s, settings)
+        new_rows = result.transactions_inserted + result.cash_flows_inserted
+        if new_rows:
+            rebuild_positions(s)
+            message = (
+                f"+{result.transactions_inserted} transaction(s), "
+                f"+{result.cash_flows_inserted} cash flow(s); positions rebuilt"
+            )
+        else:
+            message = "no new broker activity"
+        warn = "; ".join(str(w) for w in result.warnings[:2])[:200] or None
+        if warn and new_rows:
+            warn = f"{message}; {warn}"
+        return {"items": new_rows, "message": message, "warning": warn}
+
+    broker_skip = net_skip
+    if broker_skip is None:
+        from src.config import get_secret
+
+        if not (get_secret("IBKR_FLEX_TOKEN") and get_secret("IBKR_FLEX_QUERY_ID")):
+            broker_skip = "IBKR credentials not configured (.env)"
+    _run_stage(settings, report, run_id, "Broker sync", _broker, broker_skip)
+
     def _prices(s):
         from src.market_data import get_provider
         from src.market_data.service import update_prices
